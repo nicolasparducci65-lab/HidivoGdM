@@ -1622,10 +1622,8 @@ async function renderUsuarios(){
 
   view.innerHTML = `<div class="page-header"><h2>Usuarios</h2></div><div class="loading-state">Cargando usuarios...</div>`;
 
-  const { data: usuarios, error } = await sb
-    .from("gdm_usuarios_con_email")
-    .select("*")
-    .order("created_at");
+  const { data: usuariosRaw, error } = await sb.rpc("gdm_listar_usuarios");
+  const usuarios = usuariosRaw ? [...usuariosRaw].sort((a,b) => new Date(a.created_at) - new Date(b.created_at)) : [];
 
   if(error){
     view.innerHTML = `<div class="page-header"><h2>Usuarios</h2></div><div class="empty-state">Error: ${escapeHtml(error.message)}</div>`;
