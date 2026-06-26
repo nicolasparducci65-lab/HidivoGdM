@@ -163,6 +163,12 @@
     font-size:16px; padding:4px;
   }
   .btn-logout:hover{color:#fff;}
+  #btn-logout{
+    width:30px; height:30px; border-radius:var(--radius-sm);
+    display:flex; align-items:center; justify-content:center;
+    border:1px solid rgba(255,255,255,0.12);
+  }
+  #btn-logout:hover{background:rgba(226,68,92,0.15); border-color:var(--rojo); color:var(--rojo);}
 
   .main-content{
     flex:1; margin-left:230px;
@@ -310,7 +316,7 @@
           <p id="user-name">-</p>
           <p id="user-role">-</p>
         </div>
-        <button class="btn-logout" id="btn-logout" title="Cerrar sesion">&#10162;</button>
+        <button class="btn-logout" id="btn-logout" title="Cerrar sesion">&#9211;</button>
       </div>
     </aside>
 
@@ -435,6 +441,7 @@ document.getElementById("login-form").addEventListener("submit", async (e)=>{
 });
 
 document.getElementById("btn-logout").addEventListener("click", async ()=>{
+  if(!confirm("Cerrar sesion de HiDiVo GdM?")) return;
   await sb.auth.signOut();
   currentUser = null;
   currentRole = null;
