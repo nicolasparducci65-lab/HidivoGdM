@@ -879,6 +879,607 @@ async function openAsignarProyectoModal(equipo){
     renderEquipos();
   });
 }
+
+/* ============================================================
+   PLANES DE MANTENIMIENTO
+   ============================================================ */
+async function renderPlanes(){
+  const view = document.getElementById("view-container");
+  view.innerHTML = `<div class="page-header"><h2>Planes de mantenimiento</h2></div><div class="loading-state">Cargando planes...</div>`;
+
+  const { data: planes, error } = await sb
+    .from("gdm_planes_mantenimiento")
+    .select("*")
+    .order("equipo_tipo");
+
+  if(error){
+    view.innerHTML = `<div class="page-header"><h2>Planes de mantenimiento</h2></div><div class="empty-state">Error: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+
+  view.innerHTML = `
+    <div class="page-header">
+      <h2>Planes de mantenimiento</h2>
+      <div class="page-header-actions">
+        ${esAdmin() ? `<button class="btn btn-primary" id="btn-nuevo-plan">+ Nuevo plan</button>` : ""}
+      </div>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      ${(planes && planes.length) ? planes.map(p => `
+        <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+          <div>
+            <div style="font-weight:600; font-size:13.5px;">${escapeHtml(p.nombre_tarea)}</div>
+            <div style="font-size:12px; color:var(--texto-sec); margin-top:2px;">
+              Tipo de equipo: ${escapeHtml(p.equipo_tipo)}
+              ${p.frecuencia_horometro ? ` &middot; cada ${p.frecuencia_horometro} hrs` : ""}
+              ${p.frecuencia_dias ? ` &middot; cada ${p.frecuencia_dias} dias` : ""}
+              ${!p.activo ? ` &middot; <span class="badge badge-gris">Inactivo</span>` : ""}
+            </div>
+          </div>
+          ${esAdmin() ? `<button class="btn btn-sm" data-edit-plan="${p.id}">Editar</button>` : ""}
+        </div>
+      `).join("") : `<div class="empty-state">No hay planes de mantenimiento definidos. Crea el primero para empezar a programar mantenimientos.</div>`}
+    </div>
+  `;
+
+  if(esAdmin()){
+    document.getElementById("btn-nuevo-plan").addEventListener("click", ()=> openPlanModal(null));
+    document.querySelectorAll("[data-edit-plan]").forEach(btn=>{
+      btn.addEventListener("click", ()=>{
+        const plan = planes.find(p => p.id === btn.dataset.editPlan);
+        openPlanModal(plan);
+      });
+    });
+  }
+}
+
+function openPlanModal(plan){
+  const editing = !!plan;
+  openModal(`
+    <div class="modal-header">
+      <h3>${editing ? "Editar plan" : "Nuevo plan de mantenimiento"}</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Tipo de equipo *</label>
+        <input type="text" id="f-equipo-tipo" value="${editing ? escapeHtml(plan.equipo_tipo) : ""}" placeholder="Excavadora, Generador, etc.">
+      </div>
+      <div class="form-group">
+        <label>Nombre de la tarea *</label>
+        <input type="text" id="f-nombre-tarea" value="${editing ? escapeHtml(plan.nombre_tarea) : ""}" placeholder="Cambio de aceite y filtros">
+      </div>
+      <div class="form-group">
+        <label>Descripcion</label>
+        <textarea id="f-descripcion" rows="2">${editing && plan.descripcion ? escapeHtml(plan.descripcion) : ""}</textarea>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Frecuencia por horometro (horas)</label>
+          <input type="number" id="f-frec-horometro" value="${editing && plan.frecuencia_horometro ? plan.frecuencia_horometro : ""}" placeholder="250">
+        </div>
+        <div class="form-group">
+          <label>Frecuencia por dias</label>
+          <input type="number" id="f-frec-dias" value="${editing && plan.frecuencia_dias ? plan.frecuencia_dias : ""}" placeholder="90">
+        </div>
+      </div>
+      <p style="font-size:12px; color:var(--texto-sec); margin-top:-6px;">Completa al menos una de las dos frecuencias.</p>
+      ${editing ? `
+      <div class="form-group">
+        <label><input type="checkbox" id="f-activo" ${plan.activo ? "checked" : ""} style="width:auto; margin-right:6px;">Plan activo</label>
+      </div>` : ""}
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" id="btn-save-plan">Guardar</button>
+    </div>
+  `);
+
+  document.getElementById("btn-save-plan").addEventListener("click", async ()=>{
+    const frecHorometro = document.getElementById("f-frec-horometro").value;
+    const frecDias = document.getElementById("f-frec-dias").value;
+
+    if(!frecHorometro && !frecDias){
+      showToast("Debes especificar al menos una frecuencia (horometro o dias)", "error");
+      return;
+    }
+
+    const payload = {
+      equipo_tipo: document.getElementById("f-equipo-tipo").value.trim(),
+      nombre_tarea: document.getElementById("f-nombre-tarea").value.trim(),
+      descripcion: document.getElementById("f-descripcion").value.trim() || null,
+      frecuencia_horometro: frecHorometro ? parseFloat(frecHorometro) : null,
+      frecuencia_dias: frecDias ? parseInt(frecDias) : null,
+    };
+    if(editing){
+      payload.activo = document.getElementById("f-activo").checked;
+    }
+
+    if(!payload.equipo_tipo || !payload.nombre_tarea){
+      showToast("Tipo de equipo y nombre de tarea son obligatorios", "error");
+      return;
+    }
+
+    let result;
+    if(editing){
+      result = await sb.from("gdm_planes_mantenimiento").update(payload).eq("id", plan.id);
+    } else {
+      result = await sb.from("gdm_planes_mantenimiento").insert(payload);
+    }
+
+    if(result.error){
+      showToast("Error: " + result.error.message, "error");
+      return;
+    }
+    showToast(editing ? "Plan actualizado" : "Plan creado", "success");
+    closeModal();
+    renderPlanes();
+  });
+}
+
+/* ============================================================
+   MANTENIMIENTOS PROGRAMADOS
+   ============================================================ */
+async function renderProgramados(){
+  const view = document.getElementById("view-container");
+  view.innerHTML = `<div class="page-header"><h2>Mantenimientos programados</h2></div><div class="loading-state">Cargando...</div>`;
+
+  const { data: programados, error } = await sb
+    .from("gdm_mantenimientos_programados")
+    .select("*, gdm_equipos(codigo_interno, nombre), gdm_planes_mantenimiento(nombre_tarea)")
+    .in("estado", ["pendiente", "en_curso"])
+    .order("fecha_objetivo", { ascending: true, nullsFirst: false });
+
+  if(error){
+    view.innerHTML = `<div class="page-header"><h2>Mantenimientos programados</h2></div><div class="empty-state">Error: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+
+  view.innerHTML = `
+    <div class="page-header">
+      <h2>Mantenimientos programados</h2>
+      <div class="page-header-actions">
+        ${puedeEscribir() ? `<button class="btn btn-primary" id="btn-nuevo-programado">+ Programar mantenimiento</button>` : ""}
+      </div>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      ${(programados && programados.length) ? programados.map(p => `
+        <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+          <div>
+            <div style="font-weight:600; font-size:13.5px;">${escapeHtml(p.gdm_equipos.codigo_interno)} - ${escapeHtml(p.gdm_equipos.nombre)}</div>
+            <div style="font-size:12px; color:var(--texto-sec); margin-top:2px;">
+              ${escapeHtml(p.gdm_planes_mantenimiento.nombre_tarea)}
+              ${p.horometro_objetivo ? ` &middot; objetivo: ${p.horometro_objetivo} hrs` : ""}
+              ${p.fecha_objetivo ? ` &middot; vence: ${p.fecha_objetivo}` : ""}
+            </div>
+          </div>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <span class="badge ${p.estado === "en_curso" ? "badge-amarillo" : "badge-gris"}">${p.estado === "en_curso" ? "En curso" : "Pendiente"}</span>
+            <button class="btn btn-sm" data-completar="${p.id}">Marcar completado</button>
+          </div>
+        </div>
+      `).join("") : `<div class="empty-state">No hay mantenimientos programados activos.</div>`}
+    </div>
+  `;
+
+  if(puedeEscribir()){
+    document.getElementById("btn-nuevo-programado").addEventListener("click", openNuevoProgramadoModal);
+  }
+  document.querySelectorAll("[data-completar]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const prog = programados.find(p => p.id === btn.dataset.completar);
+      openCompletarMantenimientoModal(prog);
+    });
+  });
+}
+
+async function openNuevoProgramadoModal(){
+  const [{ data: equipos }, { data: planes }] = await Promise.all([
+    sb.from("gdm_equipos").select("id, codigo_interno, nombre, tipo").eq("estado", "operativo").order("codigo_interno"),
+    sb.from("gdm_planes_mantenimiento").select("*").eq("activo", true).order("equipo_tipo"),
+  ]);
+
+  openModal(`
+    <div class="modal-header">
+      <h3>Programar mantenimiento</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Equipo *</label>
+        <select id="f-equipo">
+          <option value="">-- Selecciona un equipo --</option>
+          ${(equipos||[]).map(e => `<option value="${e.id}" data-tipo="${escapeHtml(e.tipo)}">${escapeHtml(e.codigo_interno)} - ${escapeHtml(e.nombre)}</option>`).join("")}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Plan de mantenimiento *</label>
+        <select id="f-plan">
+          <option value="">-- Selecciona un equipo primero --</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Horometro objetivo</label>
+          <input type="number" id="f-horometro-obj" placeholder="Ej: 1250">
+        </div>
+        <div class="form-group">
+          <label>Fecha objetivo</label>
+          <input type="date" id="f-fecha-obj">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" id="btn-save-programado">Programar</button>
+    </div>
+  `);
+
+  const selectEquipo = document.getElementById("f-equipo");
+  const selectPlan = document.getElementById("f-plan");
+
+  selectEquipo.addEventListener("change", ()=>{
+    const tipoSeleccionado = selectEquipo.selectedOptions[0]?.dataset.tipo;
+    const planesFiltrados = (planes||[]).filter(p => p.equipo_tipo.toLowerCase() === (tipoSeleccionado||"").toLowerCase());
+    selectPlan.innerHTML = planesFiltrados.length
+      ? planesFiltrados.map(p => `<option value="${p.id}" data-frec-horometro="${p.frecuencia_horometro||""}" data-frec-dias="${p.frecuencia_dias||""}">${escapeHtml(p.nombre_tarea)}</option>`).join("")
+      : `<option value="">-- No hay planes para este tipo de equipo --</option>`;
+  });
+
+  document.getElementById("btn-save-programado").addEventListener("click", async ()=>{
+    const equipoId = selectEquipo.value;
+    const planId = selectPlan.value;
+    const horometroObj = document.getElementById("f-horometro-obj").value;
+    const fechaObj = document.getElementById("f-fecha-obj").value;
+
+    if(!equipoId || !planId){
+      showToast("Selecciona equipo y plan", "error");
+      return;
+    }
+    if(!horometroObj && !fechaObj){
+      showToast("Especifica horometro objetivo o fecha objetivo", "error");
+      return;
+    }
+
+    const { error } = await sb.from("gdm_mantenimientos_programados").insert({
+      equipo_id: equipoId,
+      plan_id: planId,
+      horometro_objetivo: horometroObj ? parseFloat(horometroObj) : null,
+      fecha_objetivo: fechaObj || null,
+    });
+
+    if(error){
+      showToast("Error: " + error.message, "error");
+      return;
+    }
+    showToast("Mantenimiento programado", "success");
+    closeModal();
+    renderProgramados();
+  });
+}
+
+function openCompletarMantenimientoModal(prog){
+  openModal(`
+    <div class="modal-header">
+      <h3>Completar mantenimiento</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13.5px; margin-bottom:14px;">
+        <strong>${escapeHtml(prog.gdm_equipos.codigo_interno)}</strong> - ${escapeHtml(prog.gdm_planes_mantenimiento.nombre_tarea)}
+      </p>
+      <div class="form-group">
+        <label>Tipo de mantenimiento</label>
+        <select id="f-tipo-mant">
+          <option value="preventivo">Preventivo</option>
+          <option value="correctivo">Correctivo</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Fecha real</label>
+          <input type="date" id="f-fecha-real" value="${new Date().toISOString().slice(0,10)}">
+        </div>
+        ${puedeEscribir() ? `
+        <div class="form-group">
+          <label>Costo (USD)</label>
+          <input type="number" id="f-costo" placeholder="0.00">
+        </div>` : ""}
+      </div>
+      <div class="form-group">
+        <label>Realizado por</label>
+        <input type="text" id="f-realizado-por" placeholder="Nombre del tecnico">
+      </div>
+      <div class="form-group">
+        <label>Repuestos usados</label>
+        <input type="text" id="f-repuestos" placeholder="Filtros, aceite, etc.">
+      </div>
+      <div class="form-group">
+        <label>Observaciones</label>
+        <textarea id="f-observaciones" rows="2"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" id="btn-confirmar-completar">Confirmar y cerrar mantenimiento</button>
+    </div>
+  `);
+
+  document.getElementById("btn-confirmar-completar").addEventListener("click", async ()=>{
+    const costoInput = document.getElementById("f-costo");
+    const payload = {
+      equipo_id: prog.equipo_id,
+      programado_id: prog.id,
+      tipo_mantenimiento: document.getElementById("f-tipo-mant").value,
+      fecha_real: document.getElementById("f-fecha-real").value,
+      costo: costoInput && costoInput.value ? parseFloat(costoInput.value) : null,
+      realizado_por: document.getElementById("f-realizado-por").value.trim() || null,
+      repuestos_usados: document.getElementById("f-repuestos").value.trim() || null,
+      observaciones: document.getElementById("f-observaciones").value.trim() || null,
+    };
+
+    const { error: errHist } = await sb.from("gdm_mantenimientos_historial").insert(payload);
+    if(errHist){
+      showToast("Error al registrar historial: " + errHist.message, "error");
+      return;
+    }
+
+    const { error: errUpdate } = await sb
+      .from("gdm_mantenimientos_programados")
+      .update({ estado: "completado" })
+      .eq("id", prog.id);
+
+    if(errUpdate){
+      showToast("Historial guardado, pero hubo un error al cerrar el programado: " + errUpdate.message, "error");
+      closeModal();
+      renderProgramados();
+      return;
+    }
+
+    showToast("Mantenimiento completado y registrado en historial", "success");
+    closeModal();
+    renderProgramados();
+  });
+}
+
+/* ============================================================
+   HOROMETRO
+   ============================================================ */
+async function renderHorometro(){
+  const view = document.getElementById("view-container");
+  view.innerHTML = `<div class="page-header"><h2>Horometro</h2></div><div class="loading-state">Cargando equipos...</div>`;
+
+  const { data: equipos, error } = await sb
+    .from("gdm_equipos")
+    .select("id, codigo_interno, nombre, frecuencia_tipo")
+    .in("frecuencia_tipo", ["horometro", "ambos"])
+    .order("codigo_interno");
+
+  if(error){
+    view.innerHTML = `<div class="page-header"><h2>Horometro</h2></div><div class="empty-state">Error: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+
+  if(!equipos || !equipos.length){
+    view.innerHTML = `<div class="page-header"><h2>Horometro</h2></div><div class="empty-state">No hay equipos configurados con control por horometro. Configura el "Tipo de frecuencia" al crear o editar un equipo.</div>`;
+    return;
+  }
+
+  const lecturas = {};
+  for(const eq of equipos){
+    const { data } = await sb
+      .from("gdm_lecturas_horometro")
+      .select("horas_acumuladas, fecha")
+      .eq("equipo_id", eq.id)
+      .order("fecha", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    lecturas[eq.id] = data;
+  }
+
+  view.innerHTML = `
+    <div class="page-header"><h2>Horometro</h2></div>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      ${equipos.map(eq => {
+        const ultima = lecturas[eq.id];
+        return `
+        <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+          <div>
+            <div style="font-weight:600; font-size:13.5px;">${escapeHtml(eq.codigo_interno)} - ${escapeHtml(eq.nombre)}</div>
+            <div style="font-size:12px; color:var(--texto-sec); margin-top:2px;">
+              ${ultima ? `Ultima lectura: ${ultima.horas_acumuladas} hrs (${ultima.fecha})` : "Sin lecturas registradas"}
+            </div>
+          </div>
+          <button class="btn btn-primary btn-sm" data-registrar-lectura="${eq.id}">Registrar lectura</button>
+        </div>
+      `}).join("")}
+    </div>
+  `;
+
+  document.querySelectorAll("[data-registrar-lectura]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const eq = equipos.find(e => e.id === btn.dataset.registrarLectura);
+      openRegistrarLecturaModal(eq, lecturas[eq.id]);
+    });
+  });
+}
+
+function openRegistrarLecturaModal(equipo, ultima){
+  openModal(`
+    <div class="modal-header">
+      <h3>Registrar lectura - ${escapeHtml(equipo.codigo_interno)}</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      ${ultima ? `<p style="font-size:12.5px; color:var(--texto-sec); margin-bottom:12px;">Ultima lectura registrada: ${ultima.horas_acumuladas} hrs el ${ultima.fecha}</p>` : ""}
+      <div class="form-group">
+        <label>Horas acumuladas actuales *</label>
+        <input type="number" id="f-horas" step="0.1" placeholder="Ej: 1340.5" autofocus>
+      </div>
+      <div class="form-group">
+        <label>Fecha</label>
+        <input type="date" id="f-fecha-lectura" value="${new Date().toISOString().slice(0,10)}">
+      </div>
+      <div class="form-group">
+        <label>Registrado por</label>
+        <input type="text" id="f-registrado-por" placeholder="Tu nombre">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" id="btn-save-lectura">Guardar lectura</button>
+    </div>
+  `);
+
+  document.getElementById("btn-save-lectura").addEventListener("click", async ()=>{
+    const horas = document.getElementById("f-horas").value;
+    if(!horas){
+      showToast("Ingresa las horas acumuladas", "error");
+      return;
+    }
+    if(ultima && parseFloat(horas) < parseFloat(ultima.horas_acumuladas)){
+      if(!confirm("El valor ingresado es menor a la ultima lectura registrada (" + ultima.horas_acumuladas + " hrs). Confirmas que es correcto?")){
+        return;
+      }
+    }
+
+    const { error } = await sb.from("gdm_lecturas_horometro").insert({
+      equipo_id: equipo.id,
+      horas_acumuladas: parseFloat(horas),
+      fecha: document.getElementById("f-fecha-lectura").value,
+      registrado_por: document.getElementById("f-registrado-por").value.trim() || null,
+    });
+
+    if(error){
+      showToast("Error: " + error.message, "error");
+      return;
+    }
+    showToast("Lectura registrada", "success");
+    closeModal();
+    renderHorometro();
+  });
+}
+
+/* ============================================================
+   HISTORIAL
+   ============================================================ */
+async function renderHistorial(){
+  const view = document.getElementById("view-container");
+  view.innerHTML = `<div class="page-header"><h2>Historial de mantenimientos</h2></div><div class="loading-state">Cargando historial...</div>`;
+
+  const { data: historial, error } = await sb
+    .from("gdm_mantenimientos_historial")
+    .select("*, gdm_equipos(codigo_interno, nombre)")
+    .order("fecha_real", { ascending: false })
+    .limit(100);
+
+  if(error){
+    view.innerHTML = `<div class="page-header"><h2>Historial de mantenimientos</h2></div><div class="empty-state">Error: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+
+  const verCostos = puedeEscribir();
+
+  view.innerHTML = `
+    <div class="page-header">
+      <h2>Historial de mantenimientos</h2>
+      <div class="page-header-actions">
+        <select id="f-filtro-tipo" style="padding:7px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); font-size:13px;">
+          <option value="">Todos los tipos</option>
+          <option value="preventivo">Preventivo</option>
+          <option value="correctivo">Correctivo</option>
+        </select>
+      </div>
+    </div>
+    <div id="historial-lista"></div>
+  `;
+
+  function pintarLista(filtroTipo){
+    const lista = document.getElementById("historial-lista");
+    const filtrado = filtroTipo ? historial.filter(h => h.tipo_mantenimiento === filtroTipo) : historial;
+
+    if(!filtrado.length){
+      lista.innerHTML = `<div class="empty-state">No hay registros de historial.</div>`;
+      return;
+    }
+
+    lista.innerHTML = `<div style="display:flex; flex-direction:column; gap:8px;">` + filtrado.map(h => `
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+          <div>
+            <div style="font-weight:600; font-size:13.5px;">${escapeHtml(h.gdm_equipos.codigo_interno)} - ${escapeHtml(h.gdm_equipos.nombre)}</div>
+            <div style="font-size:12px; color:var(--texto-sec); margin-top:2px;">${h.fecha_real} ${h.realizado_por ? "&middot; " + escapeHtml(h.realizado_por) : ""}</div>
+          </div>
+          <span class="badge ${h.tipo_mantenimiento === "preventivo" ? "badge-verde" : "badge-rojo"}">${h.tipo_mantenimiento === "preventivo" ? "Preventivo" : "Correctivo"}</span>
+        </div>
+        ${h.repuestos_usados ? `<div style="font-size:12.5px; margin-top:8px;"><strong>Repuestos:</strong> ${escapeHtml(h.repuestos_usados)}</div>` : ""}
+        ${h.observaciones ? `<div style="font-size:12.5px; margin-top:4px;">${escapeHtml(h.observaciones)}</div>` : ""}
+        ${verCostos && h.costo ? `<div style="font-size:12.5px; margin-top:6px; font-weight:600;">Costo: $${h.costo}</div>` : ""}
+      </div>
+    `).join("") + `</div>`;
+  }
+
+  pintarLista("");
+  document.getElementById("f-filtro-tipo").addEventListener("change", (e)=> pintarLista(e.target.value));
+}
+
+/* ============================================================
+   NOTIFICACIONES
+   ============================================================ */
+async function renderNotificaciones(){
+  const view = document.getElementById("view-container");
+  view.innerHTML = `<div class="page-header"><h2>Notificaciones</h2></div><div class="loading-state">Cargando notificaciones...</div>`;
+
+  const { data: notifs, error } = await sb
+    .from("gdm_notificaciones")
+    .select("*, gdm_equipos(codigo_interno, nombre)")
+    .order("created_at", { ascending: false })
+    .limit(50);
+
+  if(error){
+    view.innerHTML = `<div class="page-header"><h2>Notificaciones</h2></div><div class="empty-state">Error: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+
+  view.innerHTML = `
+    <div class="page-header">
+      <h2>Notificaciones</h2>
+      <div class="page-header-actions">
+        ${(notifs && notifs.some(n=>!n.leida)) ? `<button class="btn btn-sm" id="btn-marcar-todas">Marcar todas como leidas</button>` : ""}
+      </div>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      ${(notifs && notifs.length) ? notifs.map(n => `
+        <div class="card" style="border-left:4px solid var(--${n.tipo_alerta}); border-radius:0 var(--radius-md) var(--radius-md) 0; ${n.leida ? "opacity:0.6;" : ""}">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+            <div>
+              <div style="font-weight:600; font-size:13.5px;">${escapeHtml(n.gdm_equipos.codigo_interno)} - ${escapeHtml(n.gdm_equipos.nombre)}</div>
+              <div style="font-size:13px; margin-top:3px;">${escapeHtml(n.mensaje)}</div>
+              <div style="font-size:11.5px; color:var(--texto-sec); margin-top:4px;">${new Date(n.created_at).toLocaleString("es-EC")}</div>
+            </div>
+            ${!n.leida ? `<button class="btn btn-sm" data-marcar-leida="${n.id}">Marcar leida</button>` : ""}
+          </div>
+        </div>
+      `).join("") : `<div class="empty-state">No hay notificaciones todavia.</div>`}
+    </div>
+  `;
+
+  document.querySelectorAll("[data-marcar-leida]").forEach(btn=>{
+    btn.addEventListener("click", async ()=>{
+      await sb.from("gdm_notificaciones").update({ leida: true }).eq("id", btn.dataset.marcarLeida);
+      renderNotificaciones();
+      refreshNotifBadge();
+    });
+  });
+  const btnTodas = document.getElementById("btn-marcar-todas");
+  if(btnTodas){
+    btnTodas.addEventListener("click", async ()=>{
+      await sb.from("gdm_notificaciones").update({ leida: true }).eq("leida", false);
+      renderNotificaciones();
+      refreshNotifBadge();
+    });
+  }
+}
 </script>
 
 </body>
