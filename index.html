@@ -1034,16 +1034,24 @@ async function renderProgramados(){
   const view = document.getElementById("view-container");
   view.innerHTML = `<div class="page-header"><h2>Mantenimientos programados</h2></div><div class="loading-state">Cargando...</div>`;
 
-  const { data: programados, error } = await sb
-    .from("gdm_mantenimientos_programados")
-    .select("*, gdm_equipos(codigo_interno, nombre), gdm_planes_mantenimiento(nombre_tarea)")
-    .in("estado", ["pendiente", "en_curso"])
-    .order("fecha_objetivo", { ascending: true, nullsFirst: false });
+  const [{ data: programados, error }, { data: borradores }] = await Promise.all([
+    sb.from("gdm_mantenimientos_programados")
+      .select("*, gdm_equipos(codigo_interno, nombre), gdm_planes_mantenimiento(nombre_tarea)")
+      .in("estado", ["pendiente", "en_curso"])
+      .order("fecha_objetivo", { ascending: true, nullsFirst: false }),
+    sb.from("gdm_mantenimientos_borradores").select("*").order("updated_at", { ascending: false }),
+  ]);
 
   if(error){
     view.innerHTML = `<div class="page-header"><h2>Mantenimientos programados</h2></div><div class="empty-state">Error: ${escapeHtml(error.message)}</div>`;
     return;
   }
+
+  const borradoresPorProgramado = {};
+  (borradores || []).forEach(b => {
+    if(!borradoresPorProgramado[b.programado_id]) borradoresPorProgramado[b.programado_id] = [];
+    borradoresPorProgramado[b.programado_id].push(b);
+  });
 
   view.innerHTML = `
     <div class="page-header">
@@ -1052,6 +1060,26 @@ async function renderProgramados(){
         ${puedeEscribir() ? `<button class="btn btn-primary" id="btn-nuevo-programado">+ Programar mantenimiento</button>` : ""}
       </div>
     </div>
+    ${(borradores && borradores.length) ? `
+      <div style="font-size:13px; color:var(--texto-sec); margin-bottom:10px;">Tus borradores pendientes (${borradores.length})</div>
+      <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:20px;">
+        ${borradores.map(b => {
+          const prog = (programados || []).find(p => p.id === b.programado_id);
+          if(!prog) return "";
+          return `
+          <div class="card" style="border-left:4px solid var(--amarillo); border-radius:0 var(--radius-md) var(--radius-md) 0; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+            <div>
+              <div style="font-weight:600; font-size:13.5px;">${escapeHtml(prog.gdm_equipos.codigo_interno)} - ${escapeHtml(prog.gdm_planes_mantenimiento.nombre_tarea)}</div>
+              <div style="font-size:12px; color:var(--texto-sec); margin-top:2px;">Borrador guardado ${new Date(b.updated_at).toLocaleString("es-EC")}</div>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-sm btn-danger" data-eliminar-borrador="${b.id}">Eliminar borrador</button>
+              <button class="btn btn-primary btn-sm" data-continuar-borrador="${b.id}" data-prog-continuar="${prog.id}">Continuar</button>
+            </div>
+          </div>
+        `}).join("")}
+      </div>
+    ` : ""}
     <div style="display:flex; flex-direction:column; gap:8px;">
       ${(programados && programados.length) ? programados.map(p => `
         <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
@@ -1061,6 +1089,7 @@ async function renderProgramados(){
               ${escapeHtml(p.gdm_planes_mantenimiento.nombre_tarea)}
               ${p.horometro_objetivo ? ` &middot; objetivo: ${p.horometro_objetivo} hrs` : ""}
               ${p.fecha_objetivo ? ` &middot; vence: ${p.fecha_objetivo}` : ""}
+              ${borradoresPorProgramado[p.id] ? ` &middot; ${borradoresPorProgramado[p.id].length} borrador(es) en curso` : ""}
             </div>
           </div>
           <div style="display:flex; gap:6px; align-items:center;">
@@ -1071,6 +1100,22 @@ async function renderProgramados(){
       `).join("") : `<div class="empty-state">No hay mantenimientos programados activos.</div>`}
     </div>
   `;
+
+  document.querySelectorAll("[data-continuar-borrador]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const borrador = borradores.find(b => b.id === btn.dataset.continuarBorrador);
+      const prog = programados.find(p => p.id === btn.dataset.progContinuar);
+      openCompletarMantenimientoModal(prog, borrador);
+    });
+  });
+  document.querySelectorAll("[data-eliminar-borrador]").forEach(btn=>{
+    btn.addEventListener("click", async ()=>{
+      if(!confirm("Eliminar este borrador? Se perderan los datos y adjuntos cargados.")) return;
+      await sb.from("gdm_mantenimientos_borradores").delete().eq("id", btn.dataset.eliminarBorrador);
+      showToast("Borrador eliminado", "success");
+      renderProgramados();
+    });
+  });
 
   if(puedeEscribir()){
     document.getElementById("btn-nuevo-programado").addEventListener("click", openNuevoProgramadoModal);
@@ -1168,10 +1213,11 @@ async function openNuevoProgramadoModal(){
   });
 }
 
-function openCompletarMantenimientoModal(prog){
+function openCompletarMantenimientoModal(prog, borrador){
+  const b = borrador || {};
   openModal(`
     <div class="modal-header">
-      <h3>Completar mantenimiento</h3>
+      <h3>${borrador ? "Continuar borrador" : "Completar mantenimiento"}</h3>
       <button class="modal-close" onclick="closeModal()">&times;</button>
     </div>
     <div class="modal-body">
@@ -1181,43 +1227,98 @@ function openCompletarMantenimientoModal(prog){
       <div class="form-group">
         <label>Tipo de mantenimiento</label>
         <select id="f-tipo-mant">
-          <option value="preventivo">Preventivo</option>
-          <option value="correctivo">Correctivo</option>
+          <option value="preventivo" ${b.tipo_mantenimiento === "preventivo" ? "selected" : ""}>Preventivo</option>
+          <option value="correctivo" ${b.tipo_mantenimiento === "correctivo" ? "selected" : ""}>Correctivo</option>
         </select>
       </div>
       <div class="form-row">
         <div class="form-group">
           <label>Fecha real</label>
-          <input type="date" id="f-fecha-real" value="${new Date().toISOString().slice(0,10)}">
+          <input type="date" id="f-fecha-real" value="${b.fecha_real || new Date().toISOString().slice(0,10)}">
         </div>
         ${esAdmin() ? `
         <div class="form-group">
           <label>Costo (USD)</label>
-          <input type="number" id="f-costo" placeholder="0.00">
+          <input type="number" id="f-costo" placeholder="0.00" value="${b.costo != null ? b.costo : ""}">
         </div>` : ""}
       </div>
       <div class="form-group">
         <label>Realizado por</label>
-        <input type="text" id="f-realizado-por" placeholder="Nombre del tecnico">
+        <input type="text" id="f-realizado-por" placeholder="Nombre del tecnico" value="${b.realizado_por ? escapeHtml(b.realizado_por) : ""}">
       </div>
       <div class="form-group">
         <label>Repuestos usados</label>
-        <input type="text" id="f-repuestos" placeholder="Filtros, aceite, etc.">
+        <input type="text" id="f-repuestos" placeholder="Filtros, aceite, etc." value="${b.repuestos_usados ? escapeHtml(b.repuestos_usados) : ""}">
       </div>
       <div class="form-group">
         <label>Observaciones</label>
-        <textarea id="f-observaciones" rows="2"></textarea>
+        <textarea id="f-observaciones" rows="2">${b.observaciones ? escapeHtml(b.observaciones) : ""}</textarea>
+      </div>
+      <div class="form-group">
+        <label>Fotos y archivos</label>
+        <input type="file" id="f-adjuntos" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx">
+        <div id="adjuntos-lista" style="margin-top:8px; display:flex; flex-direction:column; gap:5px;"></div>
+        <div id="adjuntos-progreso" style="font-size:12px; color:var(--texto-sec); margin-top:5px; display:none;">Subiendo archivo...</div>
       </div>
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn" id="btn-guardar-borrador">Guardar borrador</button>
       <button class="btn btn-primary" id="btn-confirmar-completar">Confirmar y cerrar mantenimiento</button>
     </div>
   `);
 
-  document.getElementById("btn-confirmar-completar").addEventListener("click", async ()=>{
+  let adjuntosActuales = Array.isArray(b.adjuntos) ? [...b.adjuntos] : [];
+  let borradorId = borrador ? borrador.id : null;
+
+  function pintarAdjuntos(){
+    const cont = document.getElementById("adjuntos-lista");
+    if(!adjuntosActuales.length){ cont.innerHTML = ""; return; }
+    cont.innerHTML = adjuntosActuales.map((a, idx) => `
+      <div style="display:flex; align-items:center; justify-content:space-between; font-size:12.5px; background:var(--bg-main); padding:6px 9px; border-radius:var(--radius-sm);">
+        <a href="${a.url}" target="_blank" rel="noopener">${escapeHtml(a.nombre)}</a>
+        <button type="button" class="btn-logout" data-quitar-adjunto="${idx}" style="color:var(--rojo); font-size:14px;" title="Quitar">&times;</button>
+      </div>
+    `).join("");
+    cont.querySelectorAll("[data-quitar-adjunto]").forEach(btn=>{
+      btn.addEventListener("click", ()=>{
+        adjuntosActuales.splice(parseInt(btn.dataset.quitarAdjunto), 1);
+        pintarAdjuntos();
+      });
+    });
+  }
+  pintarAdjuntos();
+
+  document.getElementById("f-adjuntos").addEventListener("change", async (e)=>{
+    const archivos = Array.from(e.target.files);
+    if(!archivos.length) return;
+    const progreso = document.getElementById("adjuntos-progreso");
+    progreso.style.display = "block";
+
+    for(const archivo of archivos){
+      const esImagen = archivo.type.startsWith("image/");
+      const bucket = esImagen ? "hidivo-fotos" : "hidivo-archivos";
+      const rutaArchivo = `mantenimiento/${prog.equipo_id}/${Date.now()}_${archivo.name}`;
+
+      progreso.textContent = `Subiendo ${archivo.name}...`;
+
+      const { error: errUpload } = await sb.storage.from(bucket).upload(rutaArchivo, archivo);
+      if(errUpload){
+        showToast(`Error al subir ${archivo.name}: ` + errUpload.message, "error");
+        continue;
+      }
+      const { data: urlData } = sb.storage.from(bucket).getPublicUrl(rutaArchivo);
+      adjuntosActuales.push({ nombre: archivo.name, url: urlData.publicUrl, tipo: archivo.type });
+    }
+
+    progreso.style.display = "none";
+    e.target.value = "";
+    pintarAdjuntos();
+  });
+
+  function leerFormulario(){
     const costoInput = document.getElementById("f-costo");
-    const payload = {
+    return {
       equipo_id: prog.equipo_id,
       programado_id: prog.id,
       tipo_mantenimiento: document.getElementById("f-tipo-mant").value,
@@ -1227,6 +1328,31 @@ function openCompletarMantenimientoModal(prog){
       repuestos_usados: document.getElementById("f-repuestos").value.trim() || null,
       observaciones: document.getElementById("f-observaciones").value.trim() || null,
     };
+  }
+
+  document.getElementById("btn-guardar-borrador").addEventListener("click", async ()=>{
+    const payload = leerFormulario();
+    payload.adjuntos = adjuntosActuales;
+    payload.updated_at = new Date().toISOString();
+
+    if(borradorId){
+      const { error } = await sb.from("gdm_mantenimientos_borradores").update(payload).eq("id", borradorId);
+      if(error){ showToast("Error al guardar borrador: " + error.message, "error"); return; }
+    } else {
+      payload.creado_por = currentUser.id;
+      const { data, error } = await sb.from("gdm_mantenimientos_borradores").insert(payload).select().single();
+      if(error){ showToast("Error al guardar borrador: " + error.message, "error"); return; }
+      borradorId = data.id;
+    }
+
+    showToast("Borrador guardado. Puedes continuarlo despues desde Programados.", "success");
+    closeModal();
+    renderProgramados();
+  });
+
+  document.getElementById("btn-confirmar-completar").addEventListener("click", async ()=>{
+    const payload = leerFormulario();
+    payload.adjuntos = adjuntosActuales;
 
     const { error: errHist } = await sb.from("gdm_mantenimientos_historial").insert(payload);
     if(errHist){
@@ -1244,6 +1370,10 @@ function openCompletarMantenimientoModal(prog){
       closeModal();
       renderProgramados();
       return;
+    }
+
+    if(borradorId){
+      await sb.from("gdm_mantenimientos_borradores").delete().eq("id", borradorId);
     }
 
     showToast("Mantenimiento completado y registrado en historial", "success");
@@ -1548,6 +1678,10 @@ async function renderHistorial(){
         </div>
         ${h.repuestos_usados ? `<div style="font-size:12.5px; margin-top:8px;"><strong>Repuestos:</strong> ${escapeHtml(h.repuestos_usados)}</div>` : ""}
         ${h.observaciones ? `<div style="font-size:12.5px; margin-top:4px;">${escapeHtml(h.observaciones)}</div>` : ""}
+        ${(h.adjuntos && h.adjuntos.length) ? `
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
+          ${h.adjuntos.map(a => `<a href="${a.url}" target="_blank" rel="noopener" class="badge badge-gris" style="text-decoration:none;">${escapeHtml(a.nombre)}</a>`).join("")}
+        </div>` : ""}
         ${verCostos && h.costo ? `<div style="font-size:12.5px; margin-top:6px; font-weight:600;">Costo: $${h.costo}</div>` : ""}
       </div>
     `).join("") + `</div>`;
