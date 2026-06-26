@@ -374,6 +374,7 @@ const NAV_ITEMS = [
   ]},
   {group:"Sistema", items:[
     {id:"notificaciones", label:"Notificaciones", icon:"&#128276;", badgeId:"nav-badge-notif"},
+    {id:"usuarios", label:"Usuarios", icon:"&#128100;", soloAdmin:true},
   ]},
 ];
 
@@ -381,8 +382,10 @@ function renderSidebar(){
   const nav = document.getElementById("sidebar-nav");
   let html = "";
   NAV_ITEMS.forEach(group=>{
+    const itemsVisibles = group.items.filter(item => !item.soloAdmin || esAdmin());
+    if(!itemsVisibles.length) return;
     html += `<div class="nav-group-label">${group.group}</div>`;
-    group.items.forEach(item=>{
+    itemsVisibles.forEach(item=>{
       html += `<button class="nav-item" data-view="${item.id}">
         <span class="icon">${item.icon}</span>
         <span>${item.label}</span>
@@ -490,6 +493,7 @@ function navigateTo(viewId){
     horometro: renderHorometro,
     historial: renderHistorial,
     notificaciones: renderNotificaciones,
+    usuarios: renderUsuarios,
   };
   const fn = renderers[viewId];
   if(fn) fn();
@@ -1603,6 +1607,193 @@ async function renderNotificaciones(){
       refreshNotifBadge();
     });
   }
+}
+
+/* ============================================================
+   USUARIOS (solo admin)
+   ============================================================ */
+async function renderUsuarios(){
+  const view = document.getElementById("view-container");
+
+  if(!esAdmin()){
+    view.innerHTML = `<div class="page-header"><h2>Usuarios</h2></div><div class="empty-state">No tienes permiso para ver esta seccion.</div>`;
+    return;
+  }
+
+  view.innerHTML = `<div class="page-header"><h2>Usuarios</h2></div><div class="loading-state">Cargando usuarios...</div>`;
+
+  const { data: usuarios, error } = await sb
+    .from("gdm_usuarios_con_email")
+    .select("*")
+    .order("created_at");
+
+  if(error){
+    view.innerHTML = `<div class="page-header"><h2>Usuarios</h2></div><div class="empty-state">Error: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+
+  const rolLabel = { admin: "Administrador", supervisor: "Supervisor", tecnico: "Tecnico" };
+  const rolBadge = { admin: "badge-rojo", supervisor: "badge-amarillo", tecnico: "badge-verde" };
+
+  view.innerHTML = `
+    <div class="page-header">
+      <h2>Usuarios</h2>
+      <div class="page-header-actions">
+        <button class="btn btn-primary" id="btn-nuevo-usuario">+ Dar acceso a alguien</button>
+      </div>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      ${(usuarios && usuarios.length) ? usuarios.map(u => `
+        <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; ${!u.activo ? "opacity:0.55;" : ""}">
+          <div>
+            <div style="font-weight:600; font-size:13.5px;">${escapeHtml(u.email)}</div>
+            <div style="font-size:12px; color:var(--texto-sec); margin-top:2px;">
+              Desde ${new Date(u.created_at).toLocaleDateString("es-EC")}
+              ${!u.activo ? " &middot; Desactivado" : ""}
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <span class="badge ${rolBadge[u.rol] || "badge-gris"}">${rolLabel[u.rol] || u.rol}</span>
+            <button class="btn btn-sm" data-editar-usuario="${u.id}">Editar</button>
+          </div>
+        </div>
+      `).join("") : `<div class="empty-state">No hay usuarios con acceso a GdM todavia.</div>`}
+    </div>
+  `;
+
+  document.getElementById("btn-nuevo-usuario").addEventListener("click", openNuevoUsuarioModal);
+  document.querySelectorAll("[data-editar-usuario]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const u = usuarios.find(x => x.id === btn.dataset.editarUsuario);
+      openEditarUsuarioModal(u);
+    });
+  });
+}
+
+function openNuevoUsuarioModal(){
+  openModal(`
+    <div class="modal-header">
+      <h3>Dar acceso a GdM</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Correo de la persona *</label>
+        <input type="email" id="f-nuevo-email" placeholder="correo@hidivo.com">
+        <p style="font-size:12px; color:var(--texto-sec); margin-top:5px;">La persona debe tener ya una cuenta en el sistema HIDIVO (Supabase). Esto no crea una cuenta nueva, solo le da acceso a GdM.</p>
+      </div>
+      <div class="form-group">
+        <label>Rol *</label>
+        <select id="f-nuevo-rol">
+          <option value="tecnico">Tecnico</option>
+          <option value="supervisor">Supervisor</option>
+          <option value="admin">Administrador</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" id="btn-save-nuevo-usuario">Dar acceso</button>
+    </div>
+  `);
+
+  document.getElementById("btn-save-nuevo-usuario").addEventListener("click", async ()=>{
+    const email = document.getElementById("f-nuevo-email").value.trim();
+    const rol = document.getElementById("f-nuevo-rol").value;
+
+    if(!email){
+      showToast("Ingresa un correo", "error");
+      return;
+    }
+
+    const { data: userId, error: errBuscar } = await sb.rpc("gdm_buscar_user_id_por_email", { p_email: email });
+
+    if(errBuscar){
+      showToast("Error al buscar el usuario: " + errBuscar.message, "error");
+      return;
+    }
+    if(!userId){
+      showToast("No existe ninguna cuenta con ese correo en el sistema HIDIVO", "error");
+      return;
+    }
+
+    const { error: errInsert } = await sb.from("gdm_usuarios_roles").insert({
+      user_id: userId,
+      rol: rol,
+      activo: true,
+    });
+
+    if(errInsert){
+      if(errInsert.message.includes("duplicate") || errInsert.code === "23505"){
+        showToast("Esta persona ya tiene acceso a GdM. Edita su rol desde la lista.", "error");
+      } else {
+        showToast("Error: " + errInsert.message, "error");
+      }
+      return;
+    }
+
+    showToast("Acceso otorgado correctamente", "success");
+    closeModal();
+    renderUsuarios();
+  });
+}
+
+function openEditarUsuarioModal(usuario){
+  const esUnoMismo = usuario.user_id === currentUser.id;
+  openModal(`
+    <div class="modal-header">
+      <h3>${escapeHtml(usuario.email)}</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Rol</label>
+        <select id="f-edit-rol" ${esUnoMismo ? "disabled" : ""}>
+          <option value="tecnico" ${usuario.rol === "tecnico" ? "selected" : ""}>Tecnico</option>
+          <option value="supervisor" ${usuario.rol === "supervisor" ? "selected" : ""}>Supervisor</option>
+          <option value="admin" ${usuario.rol === "admin" ? "selected" : ""}>Administrador</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label><input type="checkbox" id="f-edit-activo" ${usuario.activo ? "checked" : ""} ${esUnoMismo ? "disabled" : ""} style="width:auto; margin-right:6px;">Acceso activo</label>
+      </div>
+      ${esUnoMismo ? `<p style="font-size:12px; color:var(--texto-sec);">No puedes cambiar tu propio rol ni desactivarte a ti mismo.</p>` : ""}
+    </div>
+    <div class="modal-footer">
+      ${!esUnoMismo ? `<button class="btn btn-danger" id="btn-quitar-acceso">Quitar acceso</button>` : ""}
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+      ${!esUnoMismo ? `<button class="btn btn-primary" id="btn-save-edit-usuario">Guardar</button>` : ""}
+    </div>
+  `);
+
+  if(esUnoMismo) return;
+
+  document.getElementById("btn-save-edit-usuario").addEventListener("click", async ()=>{
+    const { error } = await sb.from("gdm_usuarios_roles").update({
+      rol: document.getElementById("f-edit-rol").value,
+      activo: document.getElementById("f-edit-activo").checked,
+    }).eq("id", usuario.id);
+
+    if(error){
+      showToast("Error: " + error.message, "error");
+      return;
+    }
+    showToast("Usuario actualizado", "success");
+    closeModal();
+    renderUsuarios();
+  });
+
+  document.getElementById("btn-quitar-acceso").addEventListener("click", async ()=>{
+    if(!confirm(`Quitar el acceso de ${usuario.email} a GdM?`)) return;
+    const { error } = await sb.from("gdm_usuarios_roles").delete().eq("id", usuario.id);
+    if(error){
+      showToast("Error: " + error.message, "error");
+      return;
+    }
+    showToast("Acceso eliminado", "success");
+    closeModal();
+    renderUsuarios();
+  });
 }
 </script>
 
