@@ -482,6 +482,12 @@ async function checkExistingSession(){
 }
 checkExistingSession();
 
+if("serviceWorker" in navigator){
+  window.addEventListener("load", ()=>{
+    navigator.serviceWorker.register("./sw.js").catch(()=>{});
+  });
+}
+
 function navigateTo(viewId){
   currentView = viewId;
   setActiveNav(viewId);
