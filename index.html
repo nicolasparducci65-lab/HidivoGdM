@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>HiDiVo GdM - Gestion de Mantenimiento</title>
+<meta name="theme-color" content="#10101C">
+<link rel="manifest" href="manifest.json">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  :root{
+    --azul:#0073EA;
+    --azul-dark:#005bb8;
+    --ambar:#FAC775;
+    --ambar-dark:#854F0B;
+    --ambar-darker:#412402;
+    --sidebar-bg:#10101C;
+    --sidebar-text:#B4B2A9;
+    --sidebar-text-dim:#5F5E5A;
+    --bg-main:#F5F6F8;
+    --bg-card:#FFFFFF;
+    --border:#E4E6EA;
+    --texto:#1A1A1A;
+    --texto-sec:#5F5E5A;
+    --verde:#00C875;
+    --verde-bg:#EAF3DE;
+    --verde-text:#173404;
+    --amarillo:#EF9F27;
+    --amarillo-bg:#FAEEDA;
+    --amarillo-text:#412402;
+    --rojo:#E2445C;
+    --rojo-bg:#FCEBEB;
+    --rojo-text:#501313;
+    --radius-sm:6px;
+    --radius-md:8px;
+    --radius-lg:12px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg-main);
+    color:var(--texto);
+    -webkit-font-smoothing:antialiased;
+  }
+  #app{display:none;}
+  button{font-family:inherit; cursor:pointer;}
+  input, select, textarea{font-family:inherit; font-size:14px;}
+  a{color:var(--azul); text-decoration:none;}
+
+  /* ===== LOGIN ===== */
+  #login-screen{
+    min-height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:var(--sidebar-bg);
+    padding:20px;
+  }
+  .login-box{
+    background:#fff;
+    border-radius:var(--radius-lg);
+    padding:36px 32px;
+    width:100%;
+    max-width:380px;
+    box-shadow:0 8px 30px rgba(0,0,0,0.25);
+  }
+  .login-logo{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-bottom:6px;
+  }
+  .login-logo-icon{
+    width:36px; height:36px;
+    border-radius:8px;
+    background:var(--ambar);
+    display:flex; align-items:center; justify-content:center;
+    font-weight:700; font-size:18px; color:var(--ambar-darker);
+    flex-shrink:0;
+  }
+  .login-logo-text h1{font-size:18px; font-weight:600; color:var(--texto);}
+  .login-logo-text p{font-size:11px; letter-spacing:0.5px; color:var(--texto-sec); text-transform:uppercase;}
+  .login-box form{margin-top:24px; display:flex; flex-direction:column; gap:14px;}
+  .login-box label{font-size:13px; font-weight:500; color:var(--texto-sec); margin-bottom:4px; display:block;}
+  .login-box input{
+    width:100%; padding:10px 12px;
+    border:1px solid var(--border); border-radius:var(--radius-sm);
+    font-size:14px;
+  }
+  .login-box input:focus{outline:none; border-color:var(--azul); box-shadow:0 0 0 3px rgba(0,115,234,0.12);}
+  .btn-login{
+    background:var(--azul); color:#fff; border:none;
+    padding:11px; border-radius:var(--radius-sm); font-size:14px; font-weight:600;
+    margin-top:6px;
+  }
+  .btn-login:hover{background:var(--azul-dark);}
+  .btn-login:disabled{opacity:0.6; cursor:default;}
+  .login-error{
+    background:var(--rojo-bg); color:var(--rojo-text);
+    font-size:13px; padding:10px 12px; border-radius:var(--radius-sm);
+    display:none;
+  }
+
+  /* ===== LAYOUT ===== */
+  .layout{display:flex; min-height:100vh;}
+  .sidebar{
+    width:230px; flex-shrink:0;
+    background:var(--sidebar-bg);
+    display:flex; flex-direction:column;
+    position:fixed; top:0; left:0; height:100vh; overflow-y:auto;
+    z-index:50;
+    transition:transform 0.2s ease;
+  }
+  .sidebar-header{
+    display:flex; align-items:center; gap:10px;
+    padding:18px 18px 16px;
+    border-bottom:1px solid rgba(255,255,255,0.08);
+  }
+  .sidebar-logo{
+    width:30px; height:30px; border-radius:7px;
+    background:var(--ambar); color:var(--ambar-darker);
+    display:flex; align-items:center; justify-content:center;
+    font-weight:700; font-size:15px; flex-shrink:0;
+  }
+  .sidebar-header-text p:first-child{color:#fff; font-weight:600; font-size:14px;}
+  .sidebar-header-text p:last-child{color:var(--sidebar-text-dim); font-size:9.5px; letter-spacing:0.6px;}
+  .sidebar-nav{padding:14px 10px; flex:1;}
+  .nav-group-label{
+    color:var(--sidebar-text-dim); font-size:11px; letter-spacing:0.5px;
+    padding:14px 10px 6px; text-transform:uppercase;
+  }
+  .nav-group-label:first-child{padding-top:0;}
+  .nav-item{
+    display:flex; align-items:center; gap:10px;
+    padding:9px 10px; border-radius:var(--radius-sm);
+    color:var(--sidebar-text); font-size:13.5px; font-weight:500;
+    cursor:pointer; margin-bottom:2px; position:relative;
+    border:none; background:none; width:100%; text-align:left;
+  }
+  .nav-item:hover{background:rgba(255,255,255,0.06); color:#fff;}
+  .nav-item.active{background:var(--ambar); color:var(--ambar-darker);}
+  .nav-item .icon{width:16px; height:16px; flex-shrink:0; display:flex; align-items:center; justify-content:center;}
+  .nav-badge{
+    margin-left:auto; background:var(--rojo); color:#fff;
+    font-size:11px; font-weight:700; border-radius:10px;
+    min-width:18px; height:18px; display:flex; align-items:center; justify-content:center;
+    padding:0 5px;
+  }
+  .sidebar-footer{
+    padding:14px 16px; border-top:1px solid rgba(255,255,255,0.08);
+    display:flex; align-items:center; gap:10px;
+  }
+  .avatar-circle{
+    width:30px; height:30px; border-radius:50%;
+    background:var(--sidebar-text-dim); color:#fff;
+    display:flex; align-items:center; justify-content:center;
+    font-size:12px; font-weight:600; flex-shrink:0;
+  }
+  .sidebar-footer-text p:first-child{color:#fff; font-size:13px;}
+  .sidebar-footer-text p:last-child{color:var(--sidebar-text-dim); font-size:11px;}
+  .btn-logout{
+    margin-left:auto; background:none; border:none; color:var(--sidebar-text-dim);
+    font-size:16px; padding:4px;
+  }
+  .btn-logout:hover{color:#fff;}
+
+  .main-content{
+    flex:1; margin-left:230px;
+    padding:24px 28px;
+    min-width:0;
+  }
+  .topbar-mobile{
+    display:none;
+    align-items:center; justify-content:space-between;
+    background:var(--sidebar-bg); padding:14px 16px;
+    position:sticky; top:0; z-index:40;
+  }
+  .topbar-mobile button{background:none; border:none; color:#fff; font-size:22px;}
+
+  .page-header{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:20px; flex-wrap:wrap; gap:10px;
+  }
+  .page-header h2{font-size:19px; font-weight:600;}
+  .page-header-actions{display:flex; gap:8px; align-items:center;}
+
+  .btn{
+    border:1px solid var(--border); background:#fff; color:var(--texto);
+    padding:8px 14px; border-radius:var(--radius-sm); font-size:13px; font-weight:500;
+    display:inline-flex; align-items:center; gap:6px;
+  }
+  .btn:hover{background:#f5f5f5;}
+  .btn-primary{background:var(--azul); border-color:var(--azul); color:#fff;}
+  .btn-primary:hover{background:var(--azul-dark);}
+  .btn-success{background:var(--verde); border-color:var(--verde); color:#fff;}
+  .btn-danger{background:var(--rojo); border-color:var(--rojo); color:#fff;}
+  .btn-sm{padding:5px 10px; font-size:12.5px;}
+  .btn:disabled{opacity:0.55; cursor:default;}
+
+  .card{
+    background:var(--bg-card); border:1px solid var(--border);
+    border-radius:var(--radius-md); padding:16px 18px;
+  }
+  .loading-state, .empty-state{
+    text-align:center; padding:40px 20px; color:var(--texto-sec); font-size:13.5px;
+  }
+  .toast-container{
+    position:fixed; top:18px; right:18px; z-index:200;
+    display:flex; flex-direction:column; gap:8px;
+  }
+  .toast{
+    background:#1A1A1A; color:#fff; padding:11px 16px; border-radius:var(--radius-sm);
+    font-size:13.5px; box-shadow:0 4px 16px rgba(0,0,0,0.25);
+    animation:toast-in 0.18s ease;
+    max-width:320px;
+  }
+  .toast.success{background:var(--verde);}
+  .toast.error{background:var(--rojo);}
+  @keyframes toast-in{from{opacity:0; transform:translateY(-8px);} to{opacity:1; transform:translateY(0);}}
+
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(0,0,0,0.45);
+    display:none; align-items:center; justify-content:center; z-index:100;
+    padding:20px; overflow-y:auto;
+  }
+  .modal-overlay.open{display:flex;}
+  .modal-box{
+    background:#fff; border-radius:var(--radius-lg); width:100%; max-width:520px;
+    max-height:90vh; overflow-y:auto;
+  }
+  .modal-header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:18px 20px; border-bottom:1px solid var(--border);
+  }
+  .modal-header h3{font-size:16px; font-weight:600;}
+  .modal-close{background:none; border:none; font-size:20px; color:var(--texto-sec); line-height:1;}
+  .modal-body{padding:20px;}
+  .modal-footer{
+    padding:14px 20px; border-top:1px solid var(--border);
+    display:flex; justify-content:flex-end; gap:8px;
+  }
+  .form-group{margin-bottom:14px;}
+  .form-group label{display:block; font-size:12.5px; font-weight:500; color:var(--texto-sec); margin-bottom:5px;}
+  .form-group input, .form-group select, .form-group textarea{
+    width:100%; padding:9px 11px; border:1px solid var(--border); border-radius:var(--radius-sm);
+  }
+  .form-group input:focus, .form-group select:focus, .form-group textarea:focus{
+    outline:none; border-color:var(--azul);
+  }
+  .form-row{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+
+  .badge{
+    display:inline-flex; align-items:center; font-size:11.5px; font-weight:600;
+    padding:3px 9px; border-radius:var(--radius-sm);
+  }
+  .badge-verde{background:var(--verde-bg); color:var(--verde-text);}
+  .badge-amarillo{background:var(--amarillo-bg); color:var(--amarillo-text);}
+  .badge-rojo{background:var(--rojo-bg); color:var(--rojo-text);}
+  .badge-gris{background:#F1EFE8; color:#444441;}
+
+  @media (max-width:860px){
+    .sidebar{transform:translateX(-100%);}
+    .sidebar.open{transform:translateX(0);}
+    .main-content{margin-left:0; padding:18px 16px;}
+    .topbar-mobile{display:flex;}
+    .form-row{grid-template-columns:1fr;}
+  }
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">
+      <div class="login-logo-icon">H</div>
+      <div class="login-logo-text">
+        <h1>HiDiVo GdM</h1>
+        <p>Gestion de Mantenimiento</p>
+      </div>
+    </div>
+    <form id="login-form">
+      <div class="login-error" id="login-error"></div>
+      <div>
+        <label for="login-email">Correo</label>
+        <input type="email" id="login-email" required autocomplete="username">
+      </div>
+      <div>
+        <label for="login-password">Contrasena</label>
+        <input type="password" id="login-password" required autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn-login" id="login-btn">Ingresar</button>
+    </form>
+  </div>
+</div>
+
+<div id="app">
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-logo">H</div>
+        <div class="sidebar-header-text">
+          <p>HiDiVo</p>
+          <p>GESTION DE MANTENIMIENTO</p>
+        </div>
+      </div>
+      <nav class="sidebar-nav" id="sidebar-nav"></nav>
+      <div class="sidebar-footer">
+        <div class="avatar-circle" id="user-avatar">-</div>
+        <div class="sidebar-footer-text">
+          <p id="user-name">-</p>
+          <p id="user-role">-</p>
+        </div>
+        <button class="btn-logout" id="btn-logout" title="Cerrar sesion">&#10162;</button>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <div class="topbar-mobile">
+        <button id="btn-menu">&#9776;</button>
+        <strong style="color:#fff; font-size:14px;">HiDiVo GdM</strong>
+        <span style="width:22px;"></span>
+      </div>
+      <div id="view-container"></div>
+    </main>
+  </div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal-box" id="modal-box"></div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://kpswaoqxaxvhrgxntkcq.supabase.co";
+const SUPABASE_KEY = "sb_publishable_KofUOOKhYd2a6g6O1_4g0w_LYAgjebm";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let currentUser = null;
+let currentRole = null;
+let currentView = "dashboard";
+
+function showToast(msg, type){
+  const c = document.getElementById("toast-container");
+  const t = document.createElement("div");
+  t.className = "toast" + (type ? " " + type : "");
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(()=>t.remove(), 4000);
+}
+
+function openModal(html){
+  document.getElementById("modal-box").innerHTML = html;
+  document.getElementById("modal-overlay").classList.add("open");
+}
+function closeModal(){
+  document.getElementById("modal-overlay").classList.remove("open");
+  document.getElementById("modal-box").innerHTML = "";
+}
+document.getElementById("modal-overlay").addEventListener("click", (e)=>{
+  if(e.target.id === "modal-overlay") closeModal();
+});
+
+const NAV_ITEMS = [
+  {group:"Principal", items:[
+    {id:"dashboard", label:"Dashboard", icon:"&#9632;"},
+  ]},
+  {group:"Flota", items:[
+    {id:"equipos", label:"Equipos", icon:"&#9881;"},
+    {id:"planes", label:"Planes de mantenimiento", icon:"&#128203;"},
+    {id:"programados", label:"Programados", icon:"&#128197;"},
+    {id:"horometro", label:"Horometro", icon:"&#9201;"},
+    {id:"historial", label:"Historial", icon:"&#128196;"},
+  ]},
+  {group:"Sistema", items:[
+    {id:"notificaciones", label:"Notificaciones", icon:"&#128276;", badgeId:"nav-badge-notif"},
+  ]},
+];
+
+function renderSidebar(){
+  const nav = document.getElementById("sidebar-nav");
+  let html = "";
+  NAV_ITEMS.forEach(group=>{
+    html += `<div class="nav-group-label">${group.group}</div>`;
+    group.items.forEach(item=>{
+      html += `<button class="nav-item" data-view="${item.id}">
+        <span class="icon">${item.icon}</span>
+        <span>${item.label}</span>
+        ${item.badgeId ? `<span class="nav-badge" id="${item.badgeId}" style="display:none;">0</span>` : ""}
+      </button>`;
+    });
+  });
+  nav.innerHTML = html;
+  nav.querySelectorAll(".nav-item").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      navigateTo(btn.dataset.view);
+      document.getElementById("sidebar").classList.remove("open");
+    });
+  });
+}
+
+function setActiveNav(viewId){
+  document.querySelectorAll(".nav-item").forEach(btn=>{
+    btn.classList.toggle("active", btn.dataset.view === viewId);
+  });
+}
+
+document.getElementById("btn-menu").addEventListener("click", ()=>{
+  document.getElementById("sidebar").classList.toggle("open");
+});
+
+document.getElementById("login-form").addEventListener("submit", async (e)=>{
+  e.preventDefault();
+  const email = document.getElementById("login-email").value.trim();
+  const password = document.getElementById("login-password").value;
+  const btn = document.getElementById("login-btn");
+  const errBox = document.getElementById("login-error");
+  errBox.style.display = "none";
+  btn.disabled = true;
+  btn.textContent = "Ingresando...";
+
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+
+  if(error){
+    errBox.textContent = "Credenciales invalidas o sin acceso. Verifica tu correo y contrasena.";
+    errBox.style.display = "block";
+    btn.disabled = false;
+    btn.textContent = "Ingresar";
+    return;
+  }
+  await initSession(data.user);
+});
+
+document.getElementById("btn-logout").addEventListener("click", async ()=>{
+  await sb.auth.signOut();
+  currentUser = null;
+  currentRole = null;
+  document.getElementById("app").style.display = "none";
+  document.getElementById("login-screen").style.display = "flex";
+});
+
+async function initSession(user){
+  currentUser = user;
+
+  const { data: roleData, error: roleError } = await sb
+    .from("gdm_usuarios_roles")
+    .select("rol, activo")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if(roleError || !roleData || !roleData.activo){
+    document.getElementById("login-error").textContent = "Tu cuenta no tiene acceso a HiDiVo GdM. Contacta al administrador.";
+    document.getElementById("login-error").style.display = "block";
+    await sb.auth.signOut();
+    return;
+  }
+
+  currentRole = roleData.rol;
+  document.getElementById("login-screen").style.display = "none";
+  document.getElementById("app").style.display = "block";
+
+  const initials = (user.email || "?").slice(0,2).toUpperCase();
+  document.getElementById("user-avatar").textContent = initials;
+  document.getElementById("user-name").textContent = user.email;
+  document.getElementById("user-role").textContent =
+    currentRole === "admin" ? "Administrador" :
+    currentRole === "supervisor" ? "Supervisor" : "Tecnico";
+
+  renderSidebar();
+  navigateTo("dashboard");
+  refreshNotifBadge();
+}
+
+async function checkExistingSession(){
+  const { data } = await sb.auth.getSession();
+  if(data.session && data.session.user){
+    await initSession(data.session.user);
+  }
+}
+checkExistingSession();
+
+function navigateTo(viewId){
+  currentView = viewId;
+  setActiveNav(viewId);
+  const renderers = {
+    dashboard: renderDashboard,
+    equipos: renderEquipos,
+    planes: renderPlanes,
+    programados: renderProgramados,
+    horometro: renderHorometro,
+    historial: renderHistorial,
+    notificaciones: renderNotificaciones,
+  };
+  const fn = renderers[viewId];
+  if(fn) fn();
+}
+
+async function refreshNotifBadge(){
+  const { count } = await sb
+    .from("gdm_notificaciones")
+    .select("*", { count: "exact", head: true })
+    .eq("leida", false);
+  const badge = document.getElementById("nav-badge-notif");
+  if(badge){
+    if(count && count > 0){
+      badge.textContent = count;
+      badge.style.display = "flex";
+    } else {
+      badge.style.display = "none";
+    }
+  }
+}
+
+function puedeEscribir(){
+  return currentRole === "admin" || currentRole === "supervisor";
+}
+function esAdmin(){
+  return currentRole === "admin";
+}
+
+/* ============================================================
+   DASHBOARD
+   ============================================================ */
+async function renderDashboard(){
+  const view = document.getElementById("view-container");
+  view.innerHTML = `
+    <div class="page-header"><h2>Dashboard de mantenimiento</h2></div>
+    <div class="loading-state">Cargando estado de la flota...</div>
+  `;
+
+  const [{ data: equipos }, { data: semaforo }] = await Promise.all([
+    sb.from("gdm_equipos").select("id, estado"),
+    sb.from("gdm_mantenimientos_semaforo").select("*"),
+  ]);
+
+  const totalEquipos = equipos ? equipos.length : 0;
+  const sem = semaforo || [];
+  const rojos = sem.filter(s => s.color_semaforo === "rojo");
+  const amarillos = sem.filter(s => s.color_semaforo === "amarillo");
+  const verdes = sem.filter(s => s.color_semaforo === "verde");
+
+  const { data: asignaciones } = await sb
+    .from("gdm_asignacion_equipos")
+    .select("equipo_id, proyecto_id, proyectos(nombre)")
+    .is("fecha_fin", null);
+
+  const proyectoPorEquipo = {};
+  (asignaciones || []).forEach(a=>{
+    proyectoPorEquipo[a.equipo_id] = a.proyectos ? a.proyectos.nombre : null;
+  });
+
+  function filaSemaforo(s){
+    const color = s.color_semaforo;
+    const proyecto = proyectoPorEquipo[s.equipo_id];
+    let detalle = "";
+    if(s.fecha_objetivo){
+      const dias = s.dias_restantes;
+      detalle = dias < 0 ? `Vencido hace ${Math.abs(dias)} dia(s)` :
+                dias === 0 ? "Vence hoy" : `Vence en ${dias} dia(s)`;
+    } else if(s.frecuencia_horometro){
+      const pct = s.pct_vida_util_restante;
+      detalle = pct <= 0 ? "Vencido por horometro" : `${pct}% de vida util restante`;
+    }
+    return `
+      <div class="card" style="border-left:4px solid var(--${color}); border-radius:0 var(--radius-md) var(--radius-md) 0; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:8px;">
+        <div>
+          <div style="font-weight:600; font-size:13.5px;">${s.codigo_interno} - ${escapeHtml(s.equipo_nombre)}</div>
+          <div style="font-size:12px; color:var(--texto-sec); margin-top:2px;">${escapeHtml(s.nombre_tarea)} &middot; ${detalle}</div>
+        </div>
+        ${proyecto ? `<span class="badge badge-gris">${escapeHtml(proyecto)}</span>` : `<span class="badge badge-gris">Sin proyecto</span>`}
+      </div>
+    `;
+  }
+
+  const ordenados = [...rojos, ...amarillos, ...verdes];
+
+  view.innerHTML = `
+    <div class="page-header"><h2>Dashboard de mantenimiento</h2></div>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:12px; margin-bottom:24px;">
+      <div class="card"><div style="font-size:12px; color:var(--texto-sec); margin-bottom:4px;">Equipos totales</div><div style="font-size:22px; font-weight:700;">${totalEquipos}</div></div>
+      <div class="card" style="background:var(--verde-bg); border:none;"><div style="font-size:12px; color:var(--verde-text); margin-bottom:4px;">Al dia</div><div style="font-size:22px; font-weight:700; color:var(--verde-text);">${verdes.length}</div></div>
+      <div class="card" style="background:var(--amarillo-bg); border:none;"><div style="font-size:12px; color:var(--amarillo-text); margin-bottom:4px;">Proximos a vencer</div><div style="font-size:22px; font-weight:700; color:var(--amarillo-text);">${amarillos.length}</div></div>
+      <div class="card" style="background:var(--rojo-bg); border:none;"><div style="font-size:12px; color:var(--rojo-text); margin-bottom:4px;">Vencidos</div><div style="font-size:22px; font-weight:700; color:var(--rojo-text);">${rojos.length}</div></div>
+    </div>
+    <div style="font-size:13px; color:var(--texto-sec); margin-bottom:10px;">Estado de mantenimientos programados</div>
+    <div>
+      ${ordenados.length ? ordenados.map(filaSemaforo).join("") : `<div class="empty-state">No hay mantenimientos programados activos. Crea uno desde la seccion Programados.</div>`}
+    </div>
+  `;
+}
+
+function escapeHtml(str){
+  if(str === null || str === undefined) return "";
+  return String(str).replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+}
+
+/* ============================================================
+   EQUIPOS
+   ============================================================ */
+let _equiposCache = [];
+
+async function renderEquipos(){
+  const view = document.getElementById("view-container");
+  view.innerHTML = `<div class="page-header"><h2>Equipos</h2></div><div class="loading-state">Cargando equipos...</div>`;
+
+  const { data: equipos, error } = await sb
+    .from("gdm_equipos_con_proyecto_actual")
+    .select("*")
+    .order("codigo_interno");
+
+  if(error){
+    view.innerHTML = `<div class="page-header"><h2>Equipos</h2></div><div class="empty-state">Error al cargar equipos: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+
+  _equiposCache = equipos || [];
+
+  const estadoBadge = {
+    operativo: '<span class="badge badge-verde">Operativo</span>',
+    mantenimiento: '<span class="badge badge-amarillo">En mantenimiento</span>',
+    fuera_servicio: '<span class="badge badge-rojo">Fuera de servicio</span>',
+  };
+
+  view.innerHTML = `
+    <div class="page-header">
+      <h2>Equipos</h2>
+      <div class="page-header-actions">
+        ${puedeEscribir() ? `<button class="btn btn-primary" id="btn-nuevo-equipo">+ Nuevo equipo</button>` : ""}
+      </div>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px,1fr)); gap:12px;">
+      ${_equiposCache.length ? _equiposCache.map(eq => `
+        <div class="card" style="cursor:pointer;" data-equipo-id="${eq.id}">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+            <div>
+              <div style="font-weight:600; font-size:14px;">${escapeHtml(eq.codigo_interno)}</div>
+              <div style="font-size:13px; color:var(--texto-sec);">${escapeHtml(eq.nombre)}</div>
+            </div>
+            ${estadoBadge[eq.estado] || ""}
+          </div>
+          <div style="margin-top:10px; font-size:12px; color:var(--texto-sec); display:flex; flex-direction:column; gap:3px;">
+            <div>${escapeHtml(eq.tipo)} ${eq.marca ? "&middot; " + escapeHtml(eq.marca) : ""} ${eq.modelo ? escapeHtml(eq.modelo) : ""}</div>
+            <div>Frecuencia: ${eq.frecuencia_tipo === "horometro" ? "Por horometro" : eq.frecuencia_tipo === "dias" ? "Por dias" : "Horometro y dias"}</div>
+            <div>${eq.proyecto_actual_nombre ? `Proyecto: <strong>${escapeHtml(eq.proyecto_actual_nombre)}</strong>` : "Sin proyecto asignado"}</div>
+          </div>
+        </div>
+      `).join("") : `<div class="empty-state">No hay equipos registrados todavia.</div>`}
+    </div>
+  `;
+
+  if(puedeEscribir()){
+    document.getElementById("btn-nuevo-equipo").addEventListener("click", () => openEquipoModal(null));
+  }
+  document.querySelectorAll("[data-equipo-id]").forEach(card=>{
+    card.addEventListener("click", ()=> openEquipoDetalle(card.dataset.equipoId));
+  });
+}
+
+function openEquipoModal(equipo){
+  const editing = !!equipo;
+  openModal(`
+    <div class="modal-header">
+      <h3>${editing ? "Editar equipo" : "Nuevo equipo"}</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Codigo interno *</label>
+          <input type="text" id="f-codigo" value="${editing ? escapeHtml(equipo.codigo_interno) : ""}" placeholder="EXC-01">
+        </div>
+        <div class="form-group">
+          <label>Tipo *</label>
+          <input type="text" id="f-tipo" value="${editing ? escapeHtml(equipo.tipo) : ""}" placeholder="Excavadora">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Nombre *</label>
+        <input type="text" id="f-nombre" value="${editing ? escapeHtml(equipo.nombre) : ""}" placeholder="Excavadora CAT 320">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Marca</label>
+          <input type="text" id="f-marca" value="${editing && equipo.marca ? escapeHtml(equipo.marca) : ""}">
+        </div>
+        <div class="form-group">
+          <label>Modelo</label>
+          <input type="text" id="f-modelo" value="${editing && equipo.modelo ? escapeHtml(equipo.modelo) : ""}">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Serie</label>
+          <input type="text" id="f-serie" value="${editing && equipo.serie ? escapeHtml(equipo.serie) : ""}">
+        </div>
+        <div class="form-group">
+          <label>Anio</label>
+          <input type="number" id="f-anio" value="${editing && equipo.anio ? equipo.anio : ""}">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Tipo de frecuencia *</label>
+          <select id="f-frecuencia">
+            <option value="horometro" ${editing && equipo.frecuencia_tipo==="horometro" ? "selected":""}>Solo horometro</option>
+            <option value="dias" ${editing && equipo.frecuencia_tipo==="dias" ? "selected":""}>Solo dias</option>
+            <option value="ambos" ${editing && equipo.frecuencia_tipo==="ambos" ? "selected":""}>Ambos</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Estado</label>
+          <select id="f-estado">
+            <option value="operativo" ${editing && equipo.estado==="operativo" ? "selected":""}>Operativo</option>
+            <option value="mantenimiento" ${editing && equipo.estado==="mantenimiento" ? "selected":""}>En mantenimiento</option>
+            <option value="fuera_servicio" ${editing && equipo.estado==="fuera_servicio" ? "selected":""}>Fuera de servicio</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" id="btn-save-equipo">Guardar</button>
+    </div>
+  `);
+
+  document.getElementById("btn-save-equipo").addEventListener("click", async ()=>{
+    const payload = {
+      codigo_interno: document.getElementById("f-codigo").value.trim(),
+      tipo: document.getElementById("f-tipo").value.trim(),
+      nombre: document.getElementById("f-nombre").value.trim(),
+      marca: document.getElementById("f-marca").value.trim() || null,
+      modelo: document.getElementById("f-modelo").value.trim() || null,
+      serie: document.getElementById("f-serie").value.trim() || null,
+      anio: document.getElementById("f-anio").value ? parseInt(document.getElementById("f-anio").value) : null,
+      frecuencia_tipo: document.getElementById("f-frecuencia").value,
+      estado: document.getElementById("f-estado").value,
+    };
+    if(!payload.codigo_interno || !payload.tipo || !payload.nombre){
+      showToast("Codigo, tipo y nombre son obligatorios", "error");
+      return;
+    }
+
+    let result;
+    if(editing){
+      result = await sb.from("gdm_equipos").update(payload).eq("id", equipo.id);
+    } else {
+      result = await sb.from("gdm_equipos").insert(payload);
+    }
+
+    if(result.error){
+      showToast("Error: " + result.error.message, "error");
+      return;
+    }
+    showToast(editing ? "Equipo actualizado" : "Equipo creado", "success");
+    closeModal();
+    renderEquipos();
+  });
+}
+
+async function openEquipoDetalle(equipoId){
+  const equipo = _equiposCache.find(e => e.id === equipoId);
+  if(!equipo) return;
+
+  const { data: historial } = await sb
+    .from("gdm_mantenimientos_historial")
+    .select("*")
+    .eq("equipo_id", equipoId)
+    .order("fecha_real", { ascending: false })
+    .limit(5);
+
+  const { data: ultimaLectura } = await sb
+    .from("gdm_lecturas_horometro")
+    .select("*")
+    .eq("equipo_id", equipoId)
+    .order("fecha", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  openModal(`
+    <div class="modal-header">
+      <h3>${escapeHtml(equipo.codigo_interno)} - ${escapeHtml(equipo.nombre)}</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex; flex-direction:column; gap:6px; font-size:13.5px; margin-bottom:16px;">
+        <div><strong>Tipo:</strong> ${escapeHtml(equipo.tipo)}</div>
+        ${equipo.marca ? `<div><strong>Marca/Modelo:</strong> ${escapeHtml(equipo.marca)} ${escapeHtml(equipo.modelo||"")}</div>` : ""}
+        ${equipo.serie ? `<div><strong>Serie:</strong> ${escapeHtml(equipo.serie)}</div>` : ""}
+        <div><strong>Proyecto actual:</strong> ${equipo.proyecto_actual_nombre ? escapeHtml(equipo.proyecto_actual_nombre) : "Sin asignar"}</div>
+        <div><strong>Ultimo horometro registrado:</strong> ${ultimaLectura ? ultimaLectura.horas_acumuladas + " hrs (" + ultimaLectura.fecha + ")" : "Sin lecturas"}</div>
+      </div>
+      <div style="font-size:12.5px; font-weight:600; color:var(--texto-sec); margin-bottom:8px; text-transform:uppercase;">Ultimos mantenimientos</div>
+      ${(historial && historial.length) ? historial.map(h => `
+        <div style="font-size:13px; padding:7px 0; border-bottom:1px solid var(--border);">
+          <strong>${h.tipo_mantenimiento === "preventivo" ? "Preventivo" : "Correctivo"}</strong> &middot; ${h.fecha_real}
+          ${h.costo ? ` &middot; $${h.costo}` : ""}
+        </div>
+      `).join("") : `<div style="font-size:13px; color:var(--texto-sec);">Sin historial registrado.</div>`}
+    </div>
+    <div class="modal-footer">
+      ${puedeEscribir() ? `<button class="btn" id="btn-asignar-proyecto">Asignar a proyecto</button>` : ""}
+      ${puedeEscribir() ? `<button class="btn" id="btn-editar-equipo">Editar</button>` : ""}
+      ${esAdmin() ? `<button class="btn btn-danger" id="btn-eliminar-equipo">Eliminar</button>` : ""}
+    </div>
+  `);
+
+  if(puedeEscribir()){
+    document.getElementById("btn-editar-equipo").addEventListener("click", ()=>{
+      closeModal();
+      openEquipoModal(equipo);
+    });
+    document.getElementById("btn-asignar-proyecto").addEventListener("click", ()=>{
+      openAsignarProyectoModal(equipo);
+    });
+  }
+  if(esAdmin()){
+    document.getElementById("btn-eliminar-equipo").addEventListener("click", async ()=>{
+      if(!confirm("Eliminar este equipo? Esta accion no se puede deshacer.")) return;
+      const { error } = await sb.from("gdm_equipos").delete().eq("id", equipo.id);
+      if(error){ showToast("Error: " + error.message, "error"); return; }
+      showToast("Equipo eliminado", "success");
+      closeModal();
+      renderEquipos();
+    });
+  }
+}
+
+async function openAsignarProyectoModal(equipo){
+  const { data: proyectos } = await sb.from("proyectos").select("id, nombre").order("nombre");
+
+  openModal(`
+    <div class="modal-header">
+      <h3>Asignar a proyecto</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Proyecto</label>
+        <select id="f-proyecto">
+          <option value="">-- Sin asignar (liberar equipo) --</option>
+          ${(proyectos||[]).map(p => `<option value="${p.id}">${escapeHtml(p.nombre)}</option>`).join("")}
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" id="btn-confirmar-asignacion">Confirmar</button>
+    </div>
+  `);
+
+  document.getElementById("btn-confirmar-asignacion").addEventListener("click", async ()=>{
+    const nuevoProyectoId = document.getElementById("f-proyecto").value;
+
+    const { error: errCierre } = await sb
+      .from("gdm_asignacion_equipos")
+      .update({ fecha_fin: new Date().toISOString().slice(0,10) })
+      .eq("equipo_id", equipo.id)
+      .is("fecha_fin", null);
+
+    if(errCierre){
+      showToast("Error al liberar asignacion previa: " + errCierre.message, "error");
+      return;
+    }
+
+    if(nuevoProyectoId){
+      const { error: errInsert } = await sb.from("gdm_asignacion_equipos").insert({
+        equipo_id: equipo.id,
+        proyecto_id: nuevoProyectoId,
+        fecha_inicio: new Date().toISOString().slice(0,10),
+      });
+      if(errInsert){
+        showToast("Error al asignar: " + errInsert.message, "error");
+        return;
+      }
+    }
+
+    showToast("Asignacion actualizada", "success");
+    closeModal();
+    renderEquipos();
+  });
+}
+</script>
+
+</body>
+</html>

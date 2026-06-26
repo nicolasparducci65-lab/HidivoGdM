@@ -1,0 +1,9 @@
+{
+  "name": "HiDiVo GdM - Gestion de Mantenimiento",
+  "short_name": "HiDiVo GdM",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#10101C",
+  "theme_color": "#10101C",
+  "icons": []
+}
