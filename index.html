@@ -1491,6 +1491,7 @@ async function openHistorialHorometroModal(equipo){
       <div style="font-size:13px;">
         <strong>${l.horas_acumuladas} hrs</strong> &middot; ${l.fecha}
         ${l.registrado_por ? ` &middot; ${escapeHtml(l.registrado_por)}` : ""}
+        ${l.foto_url ? ` &middot; <a href="${l.foto_url}" target="_blank" rel="noopener">Ver foto</a>` : ""}
       </div>
       <div style="display:flex; gap:6px; flex-shrink:0;">
         <button class="btn btn-sm" data-editar-lectura="${l.id}">Editar</button>
@@ -1539,6 +1540,12 @@ function openEditarLecturaModal(equipo, lectura){
         <label>Registrado por</label>
         <input type="text" id="f-edit-registrado-por" value="${lectura.registrado_por ? escapeHtml(lectura.registrado_por) : ""}">
       </div>
+      <div class="form-group">
+        <label>Foto del horometro</label>
+        ${lectura.foto_url ? `<div style="margin-bottom:8px;"><a href="${lectura.foto_url}" target="_blank" rel="noopener"><img src="${lectura.foto_url}" style="max-width:100%; max-height:160px; border-radius:var(--radius-sm); border:1px solid var(--border);"></a></div>` : `<p style="font-size:12.5px; color:var(--texto-sec); margin-bottom:8px;">Sin foto registrada.</p>`}
+        <input type="file" id="f-edit-foto" accept="image/*" capture="environment">
+        <div id="edit-foto-preview" style="margin-top:8px;"></div>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeModal()">Cancelar</button>
@@ -1546,17 +1553,46 @@ function openEditarLecturaModal(equipo, lectura){
     </div>
   `);
 
+  let fotoNueva = null;
+  document.getElementById("f-edit-foto").addEventListener("change", (e)=>{
+    const archivo = e.target.files[0];
+    const preview = document.getElementById("edit-foto-preview");
+    if(!archivo){ fotoNueva = null; preview.innerHTML = ""; return; }
+    fotoNueva = archivo;
+    const url = URL.createObjectURL(archivo);
+    preview.innerHTML = `<p style="font-size:12px; color:var(--texto-sec); margin-bottom:4px;">Nueva foto (se reemplazara al guardar):</p><img src="${url}" style="max-width:100%; max-height:160px; border-radius:var(--radius-sm); border:1px solid var(--border);">`;
+  });
+
   document.getElementById("btn-save-edit-lectura").addEventListener("click", async ()=>{
     const horas = document.getElementById("f-edit-horas").value;
     if(!horas){
       showToast("Ingresa las horas acumuladas", "error");
       return;
     }
-    const { error } = await sb.from("gdm_lecturas_horometro").update({
+
+    const payload = {
       horas_acumuladas: parseFloat(horas),
       fecha: document.getElementById("f-edit-fecha").value,
       registrado_por: document.getElementById("f-edit-registrado-por").value.trim() || null,
-    }).eq("id", lectura.id);
+    };
+
+    if(fotoNueva){
+      const btnGuardar = document.getElementById("btn-save-edit-lectura");
+      btnGuardar.disabled = true;
+      btnGuardar.textContent = "Subiendo foto...";
+      const rutaFoto = `horometro/${equipo.id}/${Date.now()}_${fotoNueva.name}`;
+      const { error: errUpload } = await sb.storage.from("hidivo-fotos").upload(rutaFoto, fotoNueva);
+      if(errUpload){
+        showToast("Error al subir la foto: " + errUpload.message, "error");
+        btnGuardar.disabled = false;
+        btnGuardar.textContent = "Guardar cambios";
+        return;
+      }
+      const { data: urlData } = sb.storage.from("hidivo-fotos").getPublicUrl(rutaFoto);
+      payload.foto_url = urlData.publicUrl;
+    }
+
+    const { error } = await sb.from("gdm_lecturas_horometro").update(payload).eq("id", lectura.id);
 
     if(error){
       showToast("Error: " + error.message, "error");
@@ -1588,6 +1624,11 @@ function openRegistrarLecturaModal(equipo, ultima){
         <label>Registrado por</label>
         <input type="text" id="f-registrado-por" placeholder="Tu nombre">
       </div>
+      <div class="form-group">
+        <label>Foto del horometro *</label>
+        <input type="file" id="f-foto-horometro" accept="image/*" capture="environment">
+        <div id="foto-horometro-preview" style="margin-top:8px;"></div>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeModal()">Cancelar</button>
@@ -1595,10 +1636,25 @@ function openRegistrarLecturaModal(equipo, ultima){
     </div>
   `);
 
+  let fotoSeleccionada = null;
+
+  document.getElementById("f-foto-horometro").addEventListener("change", (e)=>{
+    const archivo = e.target.files[0];
+    const preview = document.getElementById("foto-horometro-preview");
+    if(!archivo){ fotoSeleccionada = null; preview.innerHTML = ""; return; }
+    fotoSeleccionada = archivo;
+    const url = URL.createObjectURL(archivo);
+    preview.innerHTML = `<img src="${url}" style="max-width:100%; max-height:160px; border-radius:var(--radius-sm); border:1px solid var(--border);">`;
+  });
+
   document.getElementById("btn-save-lectura").addEventListener("click", async ()=>{
     const horas = document.getElementById("f-horas").value;
     if(!horas){
       showToast("Ingresa las horas acumuladas", "error");
+      return;
+    }
+    if(!fotoSeleccionada){
+      showToast("La foto del horometro es obligatoria", "error");
       return;
     }
     if(ultima && parseFloat(horas) < parseFloat(ultima.horas_acumuladas)){
@@ -1607,15 +1663,32 @@ function openRegistrarLecturaModal(equipo, ultima){
       }
     }
 
+    const btnGuardar = document.getElementById("btn-save-lectura");
+    btnGuardar.disabled = true;
+    btnGuardar.textContent = "Subiendo foto...";
+
+    const rutaFoto = `horometro/${equipo.id}/${Date.now()}_${fotoSeleccionada.name}`;
+    const { error: errUpload } = await sb.storage.from("hidivo-fotos").upload(rutaFoto, fotoSeleccionada);
+    if(errUpload){
+      showToast("Error al subir la foto: " + errUpload.message, "error");
+      btnGuardar.disabled = false;
+      btnGuardar.textContent = "Guardar lectura";
+      return;
+    }
+    const { data: urlData } = sb.storage.from("hidivo-fotos").getPublicUrl(rutaFoto);
+
     const { error } = await sb.from("gdm_lecturas_horometro").insert({
       equipo_id: equipo.id,
       horas_acumuladas: parseFloat(horas),
       fecha: document.getElementById("f-fecha-lectura").value,
       registrado_por: document.getElementById("f-registrado-por").value.trim() || null,
+      foto_url: urlData.publicUrl,
     });
 
     if(error){
       showToast("Error: " + error.message, "error");
+      btnGuardar.disabled = false;
+      btnGuardar.textContent = "Guardar lectura";
       return;
     }
     showToast("Lectura registrada", "success");
