@@ -1290,7 +1290,10 @@ async function renderHorometro(){
               ${ultima ? `Ultima lectura: ${ultima.horas_acumuladas} hrs (${ultima.fecha})` : "Sin lecturas registradas"}
             </div>
           </div>
-          <button class="btn btn-primary btn-sm" data-registrar-lectura="${eq.id}">Registrar lectura</button>
+          <div style="display:flex; gap:6px;">
+            ${esAdmin() ? `<button class="btn btn-sm" data-ver-historial-horometro="${eq.id}">Ver historial</button>` : ""}
+            <button class="btn btn-primary btn-sm" data-registrar-lectura="${eq.id}">Registrar lectura</button>
+          </div>
         </div>
       `}).join("")}
     </div>
@@ -1301,6 +1304,127 @@ async function renderHorometro(){
       const eq = equipos.find(e => e.id === btn.dataset.registrarLectura);
       openRegistrarLecturaModal(eq, lecturas[eq.id]);
     });
+  });
+  if(esAdmin()){
+    document.querySelectorAll("[data-ver-historial-horometro]").forEach(btn=>{
+      btn.addEventListener("click", ()=>{
+        const eq = equipos.find(e => e.id === btn.dataset.verHistorialHorometro);
+        openHistorialHorometroModal(eq);
+      });
+    });
+  }
+}
+
+async function openHistorialHorometroModal(equipo){
+  openModal(`
+    <div class="modal-header">
+      <h3>Lecturas - ${escapeHtml(equipo.codigo_interno)}</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="historial-horometro-body">
+      <div class="loading-state">Cargando lecturas...</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal()">Cerrar</button>
+    </div>
+  `);
+
+  const { data: lecturas, error } = await sb
+    .from("gdm_lecturas_horometro")
+    .select("*")
+    .eq("equipo_id", equipo.id)
+    .order("fecha", { ascending: false })
+    .limit(20);
+
+  const body = document.getElementById("historial-horometro-body");
+  if(error){
+    body.innerHTML = `<div class="empty-state">Error: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  if(!lecturas || !lecturas.length){
+    body.innerHTML = `<div class="empty-state">Sin lecturas registradas.</div>`;
+    return;
+  }
+
+  body.innerHTML = lecturas.map(l => `
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--border);" data-lectura-row="${l.id}">
+      <div style="font-size:13px;">
+        <strong>${l.horas_acumuladas} hrs</strong> &middot; ${l.fecha}
+        ${l.registrado_por ? ` &middot; ${escapeHtml(l.registrado_por)}` : ""}
+      </div>
+      <div style="display:flex; gap:6px; flex-shrink:0;">
+        <button class="btn btn-sm" data-editar-lectura="${l.id}">Editar</button>
+        <button class="btn btn-sm btn-danger" data-eliminar-lectura="${l.id}">Eliminar</button>
+      </div>
+    </div>
+  `).join("");
+
+  body.querySelectorAll("[data-editar-lectura]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const lectura = lecturas.find(l => l.id === btn.dataset.editarLectura);
+      openEditarLecturaModal(equipo, lectura);
+    });
+  });
+  body.querySelectorAll("[data-eliminar-lectura]").forEach(btn=>{
+    btn.addEventListener("click", async ()=>{
+      if(!confirm("Eliminar esta lectura? Esto puede afectar el calculo del semaforo de mantenimiento para este equipo.")) return;
+      const { error: errDel } = await sb.from("gdm_lecturas_horometro").delete().eq("id", btn.dataset.eliminarLectura);
+      if(errDel){
+        showToast("Error: " + errDel.message, "error");
+        return;
+      }
+      showToast("Lectura eliminada", "success");
+      closeModal();
+      renderHorometro();
+    });
+  });
+}
+
+function openEditarLecturaModal(equipo, lectura){
+  openModal(`
+    <div class="modal-header">
+      <h3>Editar lectura - ${escapeHtml(equipo.codigo_interno)}</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Horas acumuladas *</label>
+        <input type="number" id="f-edit-horas" step="0.1" value="${lectura.horas_acumuladas}">
+      </div>
+      <div class="form-group">
+        <label>Fecha</label>
+        <input type="date" id="f-edit-fecha" value="${lectura.fecha}">
+      </div>
+      <div class="form-group">
+        <label>Registrado por</label>
+        <input type="text" id="f-edit-registrado-por" value="${lectura.registrado_por ? escapeHtml(lectura.registrado_por) : ""}">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" id="btn-save-edit-lectura">Guardar cambios</button>
+    </div>
+  `);
+
+  document.getElementById("btn-save-edit-lectura").addEventListener("click", async ()=>{
+    const horas = document.getElementById("f-edit-horas").value;
+    if(!horas){
+      showToast("Ingresa las horas acumuladas", "error");
+      return;
+    }
+    const { error } = await sb.from("gdm_lecturas_horometro").update({
+      horas_acumuladas: parseFloat(horas),
+      fecha: document.getElementById("f-edit-fecha").value,
+      registrado_por: document.getElementById("f-edit-registrado-por").value.trim() || null,
+    }).eq("id", lectura.id);
+
+    if(error){
+      showToast("Error: " + error.message, "error");
+      return;
+    }
+    showToast("Lectura actualizada", "success");
+    closeModal();
+    renderHorometro();
   });
 }
 
