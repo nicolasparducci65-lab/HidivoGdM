@@ -347,6 +347,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let currentUser = null;
 let currentRole = null;
 let currentView = "dashboard";
+let _presenceChannel = null;
 
 function showToast(msg, type){
   const c = document.getElementById("toast-container");
@@ -444,6 +445,11 @@ document.getElementById("login-form").addEventListener("submit", async (e)=>{
 
 document.getElementById("btn-logout").addEventListener("click", async ()=>{
   if(!confirm("Cerrar sesion de HiDiVo GdM?")) return;
+  if(_presenceChannel){
+    await _presenceChannel.untrack();
+    sb.removeChannel(_presenceChannel);
+    _presenceChannel = null;
+  }
   await sb.auth.signOut();
   currentUser = null;
   currentRole = null;
@@ -488,6 +494,37 @@ async function initSession(user){
   renderSidebar();
   navigateTo("dashboard");
   refreshNotifBadge();
+
+  sb.from("gdm_usuarios_roles").update({ ultimo_acceso: new Date().toISOString() }).eq("user_id", user.id);
+
+  unirseAPresencia(user, nombreMostrado);
+}
+
+function unirseAPresencia(user, nombreMostrado){
+  if(_presenceChannel) return;
+
+  _presenceChannel = sb.channel("gdm-presencia", {
+    config: { presence: { key: user.id } },
+  });
+
+  _presenceChannel.on("presence", { event: "sync" }, () => {
+    if(currentView === "usuarios") renderUsuarios();
+  });
+
+  _presenceChannel.subscribe(async (status) => {
+    if(status === "SUBSCRIBED"){
+      await _presenceChannel.track({
+        nombre: nombreMostrado,
+        email: user.email,
+        conectado_desde: new Date().toISOString(),
+      });
+    }
+  });
+}
+
+function obtenerUsuariosEnLinea(){
+  if(!_presenceChannel) return {};
+  return _presenceChannel.presenceState();
 }
 
 async function checkExistingSession(){
@@ -1862,21 +1899,44 @@ async function renderUsuarios(){
   const rolLabel = { admin: "Administrador", supervisor: "Supervisor", tecnico: "Tecnico" };
   const rolBadge = { admin: "badge-rojo", supervisor: "badge-amarillo", tecnico: "badge-verde" };
 
+  const presenciaState = obtenerUsuariosEnLinea();
+  const idsEnLinea = new Set(Object.keys(presenciaState).filter(uid => presenciaState[uid].length > 0));
+
+  function formatoUltimoAcceso(fecha){
+    if(!fecha) return "Nunca ha ingresado";
+    const d = new Date(fecha);
+    const ahora = new Date();
+    const diffMin = Math.round((ahora - d) / 60000);
+    if(diffMin < 1) return "Hace un momento";
+    if(diffMin < 60) return `Hace ${diffMin} min`;
+    if(diffMin < 1440) return `Hace ${Math.round(diffMin/60)} h`;
+    return d.toLocaleString("es-EC", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" });
+  }
+
   view.innerHTML = `
     <div class="page-header">
       <h2>Usuarios</h2>
       <div class="page-header-actions">
+        <span style="font-size:12.5px; color:var(--texto-sec); display:flex; align-items:center; gap:5px;">
+          <span style="width:8px; height:8px; border-radius:50%; background:var(--verde); display:inline-block;"></span>
+          ${idsEnLinea.size} en linea ahora
+        </span>
         <button class="btn btn-primary" id="btn-nuevo-usuario">+ Dar acceso a alguien</button>
       </div>
     </div>
     <div style="display:flex; flex-direction:column; gap:8px;">
-      ${(usuarios && usuarios.length) ? usuarios.map(u => `
+      ${(usuarios && usuarios.length) ? usuarios.map(u => {
+        const enLinea = idsEnLinea.has(u.user_id);
+        return `
         <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; ${!u.activo ? "opacity:0.55;" : ""}">
-          <div>
-            <div style="font-weight:600; font-size:13.5px;">${u.nombre_completo ? escapeHtml(u.nombre_completo) : escapeHtml(u.email)}</div>
-            <div style="font-size:12px; color:var(--texto-sec); margin-top:2px;">
-              ${u.nombre_completo ? escapeHtml(u.email) + " &middot; " : ""}Desde ${new Date(u.created_at).toLocaleDateString("es-EC")}
-              ${!u.activo ? " &middot; Desactivado" : ""}
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="width:9px; height:9px; border-radius:50%; flex-shrink:0; background:${enLinea ? "var(--verde)" : "var(--sidebar-text-dim)"};" title="${enLinea ? "En linea" : "Desconectado"}"></span>
+            <div>
+              <div style="font-weight:600; font-size:13.5px;">${u.nombre_completo ? escapeHtml(u.nombre_completo) : escapeHtml(u.email)}</div>
+              <div style="font-size:12px; color:var(--texto-sec); margin-top:2px;">
+                ${u.nombre_completo ? escapeHtml(u.email) + " &middot; " : ""}${enLinea ? "En linea ahora" : formatoUltimoAcceso(u.ultimo_acceso)}
+                ${!u.activo ? " &middot; Desactivado" : ""}
+              </div>
             </div>
           </div>
           <div style="display:flex; gap:8px; align-items:center;">
@@ -1884,7 +1944,7 @@ async function renderUsuarios(){
             <button class="btn btn-sm" data-editar-usuario="${u.id}">Editar</button>
           </div>
         </div>
-      `).join("") : `<div class="empty-state">No hay usuarios con acceso a GdM todavia.</div>`}
+      `}).join("") : `<div class="empty-state">No hay usuarios con acceso a GdM todavia.</div>`}
     </div>
   `;
 
