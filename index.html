@@ -156,6 +156,8 @@
     display:flex; align-items:center; justify-content:center;
     font-size:12px; font-weight:600; flex-shrink:0;
   }
+  .sidebar-footer-text{min-width:0; flex:1; overflow:hidden;}
+  .sidebar-footer-text p{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   .sidebar-footer-text p:first-child{color:#fff; font-size:13px;}
   .sidebar-footer-text p:last-child{color:var(--sidebar-text-dim); font-size:11px;}
   .btn-logout{
@@ -454,7 +456,7 @@ async function initSession(user){
 
   const { data: roleData, error: roleError } = await sb
     .from("gdm_usuarios_roles")
-    .select("rol, activo")
+    .select("rol, activo, nombre_completo")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -466,12 +468,19 @@ async function initSession(user){
   }
 
   currentRole = roleData.rol;
+  currentUser.nombre_completo = roleData.nombre_completo || null;
   document.getElementById("login-screen").style.display = "none";
   document.getElementById("app").style.display = "block";
 
-  const initials = (user.email || "?").slice(0,2).toUpperCase();
+  const nombreMostrado = roleData.nombre_completo || user.email;
+  const partesNombre = nombreMostrado.trim().split(/\s+/);
+  const initials = partesNombre.length > 1
+    ? (partesNombre[0][0] + partesNombre[1][0]).toUpperCase()
+    : nombreMostrado.slice(0,2).toUpperCase();
+
   document.getElementById("user-avatar").textContent = initials;
-  document.getElementById("user-name").textContent = user.email;
+  document.getElementById("user-name").textContent = nombreMostrado;
+  document.getElementById("user-name").title = user.email;
   document.getElementById("user-role").textContent =
     currentRole === "admin" ? "Administrador" :
     currentRole === "supervisor" ? "Supervisor" : "Tecnico";
@@ -1864,9 +1873,9 @@ async function renderUsuarios(){
       ${(usuarios && usuarios.length) ? usuarios.map(u => `
         <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; ${!u.activo ? "opacity:0.55;" : ""}">
           <div>
-            <div style="font-weight:600; font-size:13.5px;">${escapeHtml(u.email)}</div>
+            <div style="font-weight:600; font-size:13.5px;">${u.nombre_completo ? escapeHtml(u.nombre_completo) : escapeHtml(u.email)}</div>
             <div style="font-size:12px; color:var(--texto-sec); margin-top:2px;">
-              Desde ${new Date(u.created_at).toLocaleDateString("es-EC")}
+              ${u.nombre_completo ? escapeHtml(u.email) + " &middot; " : ""}Desde ${new Date(u.created_at).toLocaleDateString("es-EC")}
               ${!u.activo ? " &middot; Desactivado" : ""}
             </div>
           </div>
@@ -1901,6 +1910,10 @@ function openNuevoUsuarioModal(){
         <p style="font-size:12px; color:var(--texto-sec); margin-top:5px;">La persona debe tener ya una cuenta en el sistema HIDIVO (Supabase). Esto no crea una cuenta nueva, solo le da acceso a GdM.</p>
       </div>
       <div class="form-group">
+        <label>Nombre completo</label>
+        <input type="text" id="f-nuevo-nombre" placeholder="Ej: Jimmy Alexander Mora">
+      </div>
+      <div class="form-group">
         <label>Rol *</label>
         <select id="f-nuevo-rol">
           <option value="tecnico">Tecnico</option>
@@ -1917,6 +1930,7 @@ function openNuevoUsuarioModal(){
 
   document.getElementById("btn-save-nuevo-usuario").addEventListener("click", async ()=>{
     const email = document.getElementById("f-nuevo-email").value.trim();
+    const nombreCompleto = document.getElementById("f-nuevo-nombre").value.trim();
     const rol = document.getElementById("f-nuevo-rol").value;
 
     if(!email){
@@ -1939,6 +1953,7 @@ function openNuevoUsuarioModal(){
       user_id: userId,
       rol: rol,
       activo: true,
+      nombre_completo: nombreCompleto || null,
     });
 
     if(errInsert){
@@ -1960,10 +1975,18 @@ function openEditarUsuarioModal(usuario){
   const esUnoMismo = usuario.user_id === currentUser.id;
   openModal(`
     <div class="modal-header">
-      <h3>${escapeHtml(usuario.email)}</h3>
+      <h3>${usuario.nombre_completo ? escapeHtml(usuario.nombre_completo) : escapeHtml(usuario.email)}</h3>
       <button class="modal-close" onclick="closeModal()">&times;</button>
     </div>
     <div class="modal-body">
+      <div class="form-group">
+        <label>Correo</label>
+        <p style="font-size:13px; color:var(--texto-sec);">${escapeHtml(usuario.email)}</p>
+      </div>
+      <div class="form-group">
+        <label>Nombre completo</label>
+        <input type="text" id="f-edit-nombre" value="${usuario.nombre_completo ? escapeHtml(usuario.nombre_completo) : ""}" placeholder="Ej: Jimmy Alexander Mora">
+      </div>
       <div class="form-group">
         <label>Rol</label>
         <select id="f-edit-rol" ${esUnoMismo ? "disabled" : ""}>
@@ -1980,17 +2003,20 @@ function openEditarUsuarioModal(usuario){
     <div class="modal-footer">
       ${!esUnoMismo ? `<button class="btn btn-danger" id="btn-quitar-acceso">Quitar acceso</button>` : ""}
       <button class="btn" onclick="closeModal()">Cancelar</button>
-      ${!esUnoMismo ? `<button class="btn btn-primary" id="btn-save-edit-usuario">Guardar</button>` : ""}
+      <button class="btn btn-primary" id="btn-save-edit-usuario">Guardar</button>
     </div>
   `);
 
-  if(esUnoMismo) return;
-
   document.getElementById("btn-save-edit-usuario").addEventListener("click", async ()=>{
-    const { error } = await sb.from("gdm_usuarios_roles").update({
-      rol: document.getElementById("f-edit-rol").value,
-      activo: document.getElementById("f-edit-activo").checked,
-    }).eq("id", usuario.id);
+    const payload = {
+      nombre_completo: document.getElementById("f-edit-nombre").value.trim() || null,
+    };
+    if(!esUnoMismo){
+      payload.rol = document.getElementById("f-edit-rol").value;
+      payload.activo = document.getElementById("f-edit-activo").checked;
+    }
+
+    const { error } = await sb.from("gdm_usuarios_roles").update(payload).eq("id", usuario.id);
 
     if(error){
       showToast("Error: " + error.message, "error");
@@ -2001,17 +2027,19 @@ function openEditarUsuarioModal(usuario){
     renderUsuarios();
   });
 
-  document.getElementById("btn-quitar-acceso").addEventListener("click", async ()=>{
-    if(!confirm(`Quitar el acceso de ${usuario.email} a GdM?`)) return;
-    const { error } = await sb.from("gdm_usuarios_roles").delete().eq("id", usuario.id);
-    if(error){
-      showToast("Error: " + error.message, "error");
-      return;
-    }
-    showToast("Acceso eliminado", "success");
-    closeModal();
-    renderUsuarios();
-  });
+  if(!esUnoMismo){
+    document.getElementById("btn-quitar-acceso").addEventListener("click", async ()=>{
+      if(!confirm(`Quitar el acceso de ${usuario.email} a GdM?`)) return;
+      const { error } = await sb.from("gdm_usuarios_roles").delete().eq("id", usuario.id);
+      if(error){
+        showToast("Error: " + error.message, "error");
+        return;
+      }
+      showToast("Acceso eliminado", "success");
+      closeModal();
+      renderUsuarios();
+    });
+  }
 }
 </script>
 
